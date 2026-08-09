@@ -1,0 +1,16 @@
+*.o
+*.ofx
+*.ofx.bundle/
+
+# Generated from ColorMathBody.h at build time
+ColorMathSource.h
+
+# Test binaries and their intermediates
+tests/test_pipeline
+tests/compile_metal
+tests/parity_metal
+tests/load_plugin
+tests/dump_metal_source
+tests/kernel.metal
+tests/kernel.metallib
+tests/kernel.air
