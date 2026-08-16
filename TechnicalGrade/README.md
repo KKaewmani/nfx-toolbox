@@ -93,7 +93,7 @@ Alpha is passed through untouched.
 | Temperature | -6000 to +4500 | 0 | Relative warm/cool trim, positive warms |
 | Tint | -100 to +100 | 0 | Positive is magenta, negative is green |
 | Preserve Exposure | on/off | on | Holds neutral luminance across the balance |
-| Middle Grey | -2 to +2 EV | 0 | Stops around 0.18 |
+| Middle Grey | 0.045 to 0.72 | 0.18 | Linear pivot; ends are ±2 stops from 0.18 |
 | Contrast | -1 to +1 | 0 | Stops of slope, so 0 is unchanged |
 | Shadow Limiter | off/on | off | |
 | Shadow Limit | -8 to -2 EV | -8 | Floor, in stops below middle grey |
@@ -105,9 +105,9 @@ Alpha is passed through untouched.
 At their defaults every control is neutral, and the plugin reports itself as a
 pass through so Resolve skips it entirely.
 
-Every tone control is set in stops rather than in linear numbers. Exposure,
-Middle Grey and Contrast all read in the same unit, and a step of the same size
-does the same amount of work wherever you are on the slider.
+Exposure and Contrast are set in stops. Middle Grey is the linear pivot itself,
+so the slider reads 0.18 at rest rather than 0 EV around 0.18. The ends are still
+two stops either side (0.045 and 0.72).
 
 ## Colour science notes
 
@@ -238,7 +238,7 @@ e' = e * slope
 The pivot is a fixed point for any slope, which is the property that makes middle
 grey stay put while everything else fans out around it.
 
-Both the control and the pivot are set in stops. Contrast is the slope in stops,
+The pivot is a linear number (0.18 at rest). Contrast is the slope in stops,
 so the slider value `c` gives a slope of `2^c`: 0 leaves the image alone, +1
 doubles the stops between any two tones, -1 halves them. Setting it this way
 makes the control symmetric, so +0.5 and -0.5 are equal and opposite, which a
@@ -250,9 +250,9 @@ the tests still exercise it from 0.25 to 4, but nothing past a stop was usable i
 practice and carrying the unusable ends cost precision across the part of the
 range that gets touched.
 
-Middle Grey is in stops around 0.18, so 0 is 0.18, -1 is 0.09, +1 is 0.36, and
-the ends are the two stops either side you would expect. Moving it moves both the
-contrast fulcrum and the origin the limiters measure from.
+Middle Grey is the linear pivot: 0.18 at rest, 0.045 two stops down, 0.72 two
+stops up. Moving it moves both the contrast fulcrum and the origin the limiters
+measure from. The kernel still works in stops relative to that number.
 
 ### Limiters
 
@@ -339,10 +339,10 @@ wraps the body in a raw string literal so the runtime shader compiler receives
 character for character what the C++ compiler saw. There is no second copy of the
 maths to forget to update.
 
-The slider-to-kernel conversions live in the plugin, not the kernel. Stops become
-a linear pivot and slope, and the temperature offset becomes a matrix, all once
-per frame on the CPU, so the interface can be reshaped without touching the
-per-pixel code.
+The slider-to-kernel conversions live in the plugin, not the kernel. Contrast
+stops become a slope, and the temperature offset becomes a matrix, all once per
+frame on the CPU, so the interface can be reshaped without touching the
+per-pixel code. Middle Grey is already linear and is passed through.
 
 ## Tests
 

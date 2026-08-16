@@ -24,7 +24,7 @@
     "sigmoid before re-encoding."
 #define kPluginIdentifier "com.nfx.TechnicalGrade"
 #define kPluginVersionMajor 2
-#define kPluginVersionMinor 1
+#define kPluginVersionMinor 2
 
 #define kSupportsTiles false
 #define kSupportsMultiResolution false
@@ -32,12 +32,14 @@
 
 namespace
 {
-    // Middle grey is set in stops around 0.18 rather than as a linear number,
-    // which spaces the slider the way the eye reads it.
+    // Middle grey is the linear pivot. The slider shows that number, default
+    // 0.18, and the ends are two stops either side (0.18 * 2^±2).
     const double kBasePivot = 0.18;
     const double kPivotRangeEV = 2.0;
+    const double kPivotMin = kBasePivot * exp2(-kPivotRangeEV);
+    const double kPivotMax = kBasePivot * exp2(kPivotRangeEV);
 
-    // Contrast is set in stops as well: the slope is 2^control, so the control
+    // Contrast is set in stops: the slope is 2^control, so the control
     // runs -1 to +1 for a slope of 0.5 to 2 and is symmetric about no change.
     // The kernel will take any slope; the range is this narrow because the ends
     // of a wider one were unusable and cost precision everywhere in between.
@@ -197,7 +199,7 @@ TechnicalGradePlugin::TechnicalGradePlugin(OfxImageEffectHandle p_Handle)
     m_Temperature = fetchDoubleParam("temperature");
     m_Tint = fetchDoubleParam("tint");
     m_PreserveExposure = fetchBooleanParam("preserveExposure");
-    m_Pivot = fetchDoubleParam("pivot");
+    m_Pivot = fetchDoubleParam("middleGrey");
     m_Contrast = fetchDoubleParam("contrast");
     m_ShadowEnable = fetchBooleanParam("shadowEnable");
     m_ShadowLimit = fetchDoubleParam("shadowLimit");
@@ -285,7 +287,7 @@ KernelParams TechnicalGradePlugin::buildParams(double p_Time, const OfxRectI& p_
 
     // Both tone controls are set in stops and converted to the linear quantities
     // the kernel wants, which keeps the sliders evenly spaced in what the eye sees.
-    params.pivot = static_cast<float>(kBasePivot * exp2(m_Pivot->getValueAtTime(p_Time)));
+    params.pivot = static_cast<float>(m_Pivot->getValueAtTime(p_Time));
     params.slope = static_cast<float>(exp2(m_Contrast->getValueAtTime(p_Time)));
 
     params.shadowEnable = m_ShadowEnable->getValueAtTime(p_Time) ? 1.0f : 0.0f;
@@ -486,10 +488,10 @@ void TechnicalGradePluginFactory::describeInContext(OFX::ImageEffectDescriptor& 
     toneGroup->setHint("Slope of the log2 exposure response about middle grey.");
     page->addChild(*toneGroup);
 
-    param = defineDouble(p_Desc, "pivot", "Middle Grey (EV)",
-        "The tone held fixed by the contrast slope, and the origin the limiters measure from. "
-        "In stops around 0.18, so 0 is 0.18, -1 is 0.09 and +1 is 0.36.",
-        0.0, -kPivotRangeEV, kPivotRangeEV, 0.05, toneGroup);
+    param = defineDouble(p_Desc, "middleGrey", "Middle Grey",
+        "The linear tone held fixed by the contrast slope, and the origin the limiters measure from. "
+        "0.18 is ACEScct middle grey. The ends are two stops either side: 0.045 and 0.72.",
+        kBasePivot, kPivotMin, kPivotMax, 0.005, toneGroup);
     page->addChild(*param);
 
     param = defineDouble(p_Desc, "contrast", "Contrast",
