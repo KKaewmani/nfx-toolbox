@@ -11,7 +11,7 @@ contrast and highlight/shadow limiting in ACES.
 
 ## Technical Grade
 
-Appears under **NFX Toolbox** in Resolve's OpenFX library. Current version 2.1.
+Appears under **NFX Toolbox** in Resolve's OpenFX library. Current version 2.2.
 
 The plugin decodes to scene-linear ACES AP1, does every operation there, and
 re-encodes on the way out, so each control does the thing its name suggests
@@ -36,9 +36,10 @@ colour by the same perceptual amount anywhere on the range. Bradford chromatic
 adaptation underneath. **Preserve Exposure** holds neutral luminance so the
 control changes colour without changing brightness.
 
-**Contrast**, Middle Grey -2 to +2 EV around 0.18, and Contrast -1 to +1. Both in
-stops. Contrast is the slope in log2 exposure, so 0 leaves the image alone and +1
-doubles the stops between any two tones.
+**Contrast**, Middle Grey 0.045 to 0.72 (default 0.18, the linear pivot; ends are
+±2 stops), and Contrast -1 to +1 in stops. Contrast is the slope in log2
+exposure, so 0 leaves the image alone and +1 doubles the stops between any two
+tones.
 
 **Limiters**, Shadow -8 to -2 EV and Highlight +2 to +8 EV, each with a softness
 of 0.2 to 1. A tanh sigmoid that leaves the knee at exactly the slope it arrived
@@ -68,67 +69,22 @@ Restart Resolve afterwards; it only enumerates plugins at launch. See
 [`TechnicalGrade/README.md`](TechnicalGrade/README.md) for the colour science,
 the parameter reference and how the shared CPU/GPU maths is arranged.
 
-## Working across two machines
+## Platforms
 
-The plugin renders through Metal, so it **only builds on macOS**. That splits
-development across two machines:
-
-- **The Mac builds.** It clones and pulls this repo anonymously, because the
-  repo is public, and has no credentials for the GitHub account that owns it.
-  It can edit, build, test and commit, but not push.
-- **The PC publishes.** It holds the SSH key for the account and is the only
-  machine that can push.
-
-Commits therefore travel from the Mac to the PC by hand.
-
-### Moving commits to the PC
-
-Commit on the Mac as usual, then package the branch into a single file:
-
-```bash
-git bundle create ~/Desktop/update.bundle main
-```
-
-Copy that one file across on a USB stick. Then, inside the existing clone on the
-PC:
-
-```powershell
-git pull D:\update.bundle main
-git push
-```
-
-A bundle is a whole branch's history in one file, a couple of hundred kilobytes
-for this project. `git pull` fast-forwards the PC onto it, leaving that clone's
-config and remote untouched.
-
-**Do not copy the working folder across and overwrite the other one.** It drags
-along build artefacts and the `.git` directory, wipes out the destination's own
-configuration, and silently destroys any commit the destination had that the
-source did not. The bundle merges histories; a folder copy replaces one with the
-other.
-
-### Bringing the PC up to date on the Mac
-
-Anything pushed from the PC comes back down normally, since the repo is public
-and needs no credentials to read:
-
-```bash
-git pull
-```
+The plugin uses Metal, so **`make` only works on macOS**. You can clone, read,
+and edit the source on any OS. Push and pull over git as usual; there is no
+need to copy working folders or git bundles between machines.
 
 ## Commit identity
 
-This repository sets its author name and email locally, overriding whatever the
-machine's global git config says, so commits are attributed to the right account
-regardless of which machine they were made on:
+Do not put a personal email in this repository. For public commits, use the
+noreply address GitHub shows under **Settings → Emails** (keep “Block command
+line pushes that expose my email” on if you use that option):
 
 ```bash
-git config user.name  "Kritsada Kaewmani"
-git config user.email "kritsadakaewmani@gmail.com"
+git config user.name  "your-github-username"
+git config user.email "ID+username@users.noreply.github.com"
 ```
-
-Worth checking with `git config user.email` after cloning onto a new machine.
-Fixing the author of a commit after the fact means rewriting history.
 
 ## Licence
 
