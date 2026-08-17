@@ -4,7 +4,7 @@ OpenFX plugins for DaVinci Resolve on macOS. One so far: **Technical Grade**, a
 scene-linear grading tool covering exposure, lens falloff, white balance,
 contrast and highlight/shadow limiting in ACES.
 
-## How to install
+📥 ## How to install
 
 macOS 11 or newer, **DaVinci Resolve Studio** (the free version does not load
 third-party OpenFX). Apple Silicon and Intel both work from the same bundle.
@@ -39,7 +39,7 @@ sudo xattr -dr com.apple.quarantine /Library/OFX/Plugins/TechnicalGrade.ofx.bund
 
 USB copy, `scp` and `rsync` do not set that tag.
 
-### From this repository (developers)
+📦 ### From this repository (developers)
 
 Xcode command line tools (`xcode-select --install` if `make` is missing). The
 OpenFX SDK is already in the repo.
