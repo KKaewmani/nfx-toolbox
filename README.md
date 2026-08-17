@@ -52,9 +52,8 @@ the grade (and back on the way out) so white balance stays an AP1 Bradford CAT.
 Everything downstream happens in linear whichever you pick.
 
 **Exposure**, -6 to +6 EV. A linear gain of 2^EV applied to all three channels.
-
-**Lens Falloff (Vignette)**, Corner Exposure -4 to +4 EV. A radial exposure
-change: nothing at the centre, the full amount at the corners, following
+**Lens Falloff (Vignette)**, -4 to +4 EV, in the same Exposure section. A radial
+exposure change: nothing at the centre, the full amount at the corners, following
 `2^(EV * r^2)`. That profile is the physical `cos^4` falloff law to second order,
 so positive values genuinely cancel a lens that darkens the corners and negative
 values emulate one. The radius is measured with the pixel aspect ratio applied,
@@ -72,7 +71,7 @@ control changes colour without changing brightness.
 exposure, so 0 leaves the image alone and +1 doubles the stops between any two
 tones.
 
-**Limiters**, Shadow -8 to -2 EV and Highlight +2 to +8 EV, each with a softness
+**Limiters**, Highlight +2 to +8 EV and Shadow -8 to -2 EV, each with a softness
 of 0.2 to 1. A tanh sigmoid that leaves the knee at exactly the slope it arrived
 with and approaches the limit asymptotically, so there is no flat clipped region
 and no visible crease at the join.

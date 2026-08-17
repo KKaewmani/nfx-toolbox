@@ -92,18 +92,18 @@ Alpha is passed through untouched.
 | --- | --- | --- | --- |
 | Working Space | ACEScct, ACEScc, Linear AP1, LogC3 EI 800, LogC4, S-Log3, C-Log3, Log3G10 | ACEScct | Encoding in and out. Camera logs are converted to AP1 for the grade |
 | Exposure | -6 to +6 EV | 0 | Linear gain of 2^EV |
-| Corner Exposure | -4 to +4 EV | 0 | Lens falloff. Positive opens the corners up, negative darkens them |
+| Lens Falloff (Vignette) | -4 to +4 EV | 0 | Radial exposure. Positive opens the corners up, negative darkens them |
 | Temperature | -6000 to +4500 | 0 | Relative warm/cool trim, positive warms |
 | Tint | -100 to +100 | 0 | Positive is magenta, negative is green |
 | Preserve Exposure | on/off | on | Holds neutral luminance across the balance |
 | Middle Grey | 0.045 to 0.72 | 0.18 | Linear pivot; ends are ±2 stops from 0.18 |
 | Contrast | -1 to +1 | 0 | Stops of slope, so 0 is unchanged |
-| Shadow Limiter | off/on | off | |
-| Shadow Limit | -8 to -2 EV | -8 | Floor, in stops below middle grey |
-| Shadow Softness | 0.2 to 1 | 0.5 | 1 rolls off all the way from middle grey |
 | Highlight Limiter | off/on | off | |
 | Highlight Limit | +2 to +8 EV | +8 | Ceiling, in stops above middle grey |
 | Highlight Softness | 0.2 to 1 | 0.5 | 1 rolls off all the way from middle grey |
+| Shadow Limiter | off/on | off | |
+| Shadow Limit | -8 to -2 EV | -8 | Floor, in stops below middle grey |
+| Shadow Softness | 0.2 to 1 | 0.5 | 1 rolls off all the way from middle grey |
 
 At their defaults every control is neutral, and the plugin reports itself as a
 pass through so Resolve skips it entirely.

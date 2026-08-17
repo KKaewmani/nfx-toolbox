@@ -447,22 +447,21 @@ void TechnicalGradePluginFactory::describeInContext(OFX::ImageEffectDescriptor& 
     page->addChild(*space);
 
     // Exposure --------------------------------------------------------------
+    GroupParamDescriptor* exposureGroup = p_Desc.defineGroupParam("exposureGroup");
+    exposureGroup->setLabels("Exposure", "Exposure", "Exposure");
+    exposureGroup->setHint("Uniform gain and radial falloff, both in stops.");
+    page->addChild(*exposureGroup);
+
     DoubleParamDescriptor* param = defineDouble(p_Desc, "exposure", "Exposure (EV)",
         "Linear gain of 2^EV, applied to all three channels before anything else.",
-        0.0, -6.0, 6.0, 0.01, 0);
+        0.0, -6.0, 6.0, 0.01, exposureGroup);
     page->addChild(*param);
 
-    // Lens falloff ----------------------------------------------------------
-    GroupParamDescriptor* vignetteGroup = p_Desc.defineGroupParam("lensFalloff");
-    vignetteGroup->setLabels("Lens Falloff (Vignette)", "Lens Falloff (Vignette)", "Lens Falloff (Vignette)");
-    vignetteGroup->setHint("Exposure that varies with distance from the centre of the frame.");
-    page->addChild(*vignetteGroup);
-
-    param = defineDouble(p_Desc, "vignette", "Corner Exposure (EV)",
+    param = defineDouble(p_Desc, "vignette", "Lens Falloff (Vignette)",
         "Exposure change at the far corners, easing to none at the centre. "
         "Positive opens the corners up to cancel a lens that darkens them; "
         "negative darkens them for a vignette. 0 does nothing.",
-        0.0, -kMaxVignetteEV, kMaxVignetteEV, 0.05, vignetteGroup);
+        0.0, -kMaxVignetteEV, kMaxVignetteEV, 0.05, exposureGroup);
     page->addChild(*param);
 
     // White balance ---------------------------------------------------------
@@ -513,20 +512,6 @@ void TechnicalGradePluginFactory::describeInContext(OFX::ImageEffectDescriptor& 
     limitGroup->setHint("Sigmoid roll-off that bounds how far the image may travel from middle grey.");
     page->addChild(*limitGroup);
 
-    boolParam = defineBoolean(p_Desc, "shadowEnable", "Enable Shadow Limiter",
-        "Bound how far below middle grey the image may go.", false, limitGroup);
-    page->addChild(*boolParam);
-
-    param = defineDouble(p_Desc, "shadowLimit", "Shadow Limit (EV)",
-        "Floor in stops below middle grey. The curve approaches it without ever reaching it.",
-        -kMaxLimiterEV, -kMaxLimiterEV, -kMinLimiterEV, 0.05, limitGroup);
-    page->addChild(*param);
-
-    param = defineDouble(p_Desc, "shadowSoftness", "Shadow Softness",
-        "How far up towards middle grey the roll-off begins. At 1 it starts at middle grey itself.",
-        0.5, kMinSoftness, 1.0, 0.01, limitGroup);
-    page->addChild(*param);
-
     boolParam = defineBoolean(p_Desc, "highlightEnable", "Enable Highlight Limiter",
         "Bound how far above middle grey the image may go.", false, limitGroup);
     page->addChild(*boolParam);
@@ -538,6 +523,20 @@ void TechnicalGradePluginFactory::describeInContext(OFX::ImageEffectDescriptor& 
 
     param = defineDouble(p_Desc, "highlightSoftness", "Highlight Softness",
         "How far down towards middle grey the roll-off begins. At 1 it starts at middle grey itself.",
+        0.5, kMinSoftness, 1.0, 0.01, limitGroup);
+    page->addChild(*param);
+
+    boolParam = defineBoolean(p_Desc, "shadowEnable", "Enable Shadow Limiter",
+        "Bound how far below middle grey the image may go.", false, limitGroup);
+    page->addChild(*boolParam);
+
+    param = defineDouble(p_Desc, "shadowLimit", "Shadow Limit (EV)",
+        "Floor in stops below middle grey. The curve approaches it without ever reaching it.",
+        -kMaxLimiterEV, -kMaxLimiterEV, -kMinLimiterEV, 0.05, limitGroup);
+    page->addChild(*param);
+
+    param = defineDouble(p_Desc, "shadowSoftness", "Shadow Softness",
+        "How far up towards middle grey the roll-off begins. At 1 it starts at middle grey itself.",
         0.5, kMinSoftness, 1.0, 0.01, limitGroup);
     page->addChild(*param);
 }
