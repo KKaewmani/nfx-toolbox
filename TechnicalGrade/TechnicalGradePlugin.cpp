@@ -177,7 +177,6 @@ private:
     OFX::DoubleParam* m_Vignette;
     OFX::DoubleParam* m_Temperature;
     OFX::DoubleParam* m_Tint;
-    OFX::BooleanParam* m_PreserveExposure;
     OFX::DoubleParam* m_Pivot;
     OFX::DoubleParam* m_Contrast;
     OFX::BooleanParam* m_ShadowEnable;
@@ -199,7 +198,6 @@ TechnicalGradePlugin::TechnicalGradePlugin(OfxImageEffectHandle p_Handle)
     m_Vignette = fetchDoubleParam("vignette");
     m_Temperature = fetchDoubleParam("temperature");
     m_Tint = fetchDoubleParam("tint");
-    m_PreserveExposure = fetchBooleanParam("preserveExposure");
     m_Pivot = fetchDoubleParam("middleGrey");
     m_Contrast = fetchDoubleParam("contrast");
     m_ShadowEnable = fetchBooleanParam("shadowEnable");
@@ -271,9 +269,8 @@ KernelParams TechnicalGradePlugin::buildParams(double p_Time, const OfxRectI& p_
 
     const double temperature = m_Temperature->getValueAtTime(p_Time);
     const double tint = m_Tint->getValueAtTime(p_Time);
-    const bool preserveExposure = m_PreserveExposure->getValueAtTime(p_Time);
 
-    wb::computeMatrix(temperature, tint, preserveExposure, params.matrix);
+    wb::computeMatrix(temperature, tint, true, params.matrix);
 
     // Exposure is a plain linear gain, so it folds straight into the adaptation
     // matrix and costs the kernel nothing.
@@ -474,11 +471,6 @@ void TechnicalGradePluginFactory::describeInContext(OFX::ImageEffectDescriptor& 
         0.0, -100.0, 100.0, 0.5, exposureGroup);
     page->addChild(*param);
 
-    BooleanParamDescriptor* boolParam = defineBoolean(p_Desc, "preserveExposure", "Preserve Exposure",
-        "Normalise the balance so a neutral holds its luminance, changing colour without changing brightness.",
-        true, exposureGroup);
-    page->addChild(*boolParam);
-
     // Tonal range -----------------------------------------------------------
     GroupParamDescriptor* toneGroup = p_Desc.defineGroupParam("tonalRange");
     toneGroup->setLabels("Tonal Range", "Tonal Range", "Tonal Range");
@@ -519,8 +511,13 @@ void TechnicalGradePluginFactory::describeInContext(OFX::ImageEffectDescriptor& 
         0.5, kMinSoftness, 1.0, 0.01, toneGroup);
     page->addChild(*param);
 
-    // Kept so existing projects that stored the old checkboxes still load.
-    // Hidden: they do not skip GPU work, they only gate the per-pixel tanh.
+    // Hidden leftovers so existing projects still load. White balance always
+    // preserves luminance; the limiter checkboxes do not skip GPU work.
+    BooleanParamDescriptor* boolParam = defineBoolean(p_Desc, "preserveExposure", "Preserve Exposure for WB",
+        "Normalise the white-balance matrix so a neutral holds its luminance.",
+        true, 0);
+    boolParam->setIsSecret(true);
+
     boolParam = defineBoolean(p_Desc, "highlightEnable", "Enable Highlight Limiter",
         "Bound how far above middle grey the image may go.", false, 0);
     boolParam->setIsSecret(true);

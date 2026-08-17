@@ -53,9 +53,8 @@ namespace wb
     // the direction of a camera raw temperature control. Positive tint is
     // magenta.
     //
-    // With preserveExposure the matrix is normalised so that an AP1 neutral
-    // keeps its luminance, letting the control change colour without changing
-    // brightness.
+    // The plugin always passes preserveExposure true, so an AP1 neutral keeps
+    // its luminance. The flag remains for tests.
     void computeMatrix(double temperatureOffset, double tint, bool preserveExposure, float outMatrix[9]);
 
     // Chromaticity of the assumed illuminant, exposed for the test harness.

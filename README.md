@@ -81,8 +81,7 @@ Temperature and Tint, both -100 to +100 per notch. Temperature is a relative
 offset rather than an absolute Kelvin reading, because nothing here knows what
 the scene was lit by. It steps in mired, so the same movement shifts colour by
 the same perceptual amount anywhere on the range. Bradford chromatic adaptation
-underneath. **Preserve Exposure** holds neutral luminance so the control changes
-colour without changing brightness.
+underneath; a grey card keeps its brightness while its colour moves.
 
 **Tonal Range.** Middle Grey 0.045 to 0.72 (default 0.18, the linear pivot; ends
 are ±2 stops), Contrast -1 to +1 in stops, and highlight/shadow limiters. Contrast

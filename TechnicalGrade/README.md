@@ -98,7 +98,6 @@ Alpha is passed through untouched.
 | Lens Falloff (Vignette) | -4 to +4 EV | 0 | Radial exposure. Positive opens the corners up, negative darkens them |
 | Temperature | -6000 to +4500 | 0 | Relative warm/cool trim, positive warms |
 | Tint | -100 to +100 | 0 | Positive is magenta, negative is green |
-| Preserve Exposure | on/off | on | Holds neutral luminance across the balance |
 | Middle Grey | 0.045 to 0.72 | 0.18 | Linear pivot for contrast and limiters; ends are ±2 stops from 0.18 |
 | Contrast | -1 to +1 | 0 | Stops of slope, so 0 is unchanged. In Tonal Range with the limiters |
 | Highlight Limit | +2 to +8 EV | +8 | Off at +8; pull down to engage. Ceiling in stops above middle grey |
@@ -172,7 +171,7 @@ Mechanically:
 3. A von Kries adaptation in the Bradford cone space maps the assumed illuminant
    to the neutral reference, and the result is composed into AP1:
    `M = AP1_from_XYZ . Bradford^-1 . diag(LMS_ref / LMS_assumed) . Bradford . XYZ_from_AP1`.
-4. With Preserve Exposure on, the matrix is divided by the AP1 luminance of the
+4. The matrix is divided by the AP1 luminance of the
    adapted neutral, so a grey card holds its brightness while its colour moves.
 
 The neutral reference is the Planckian white at 6000 K. It is 0.0032 from the
