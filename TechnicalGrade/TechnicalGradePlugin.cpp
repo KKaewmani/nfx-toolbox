@@ -10,6 +10,7 @@
 #include "ofxsLog.h"
 
 #include "ColorMath.h"
+#include "ColorSpaces.h"
 #include "KernelParams.h"
 #include "WhiteBalance.h"
 
@@ -24,7 +25,7 @@
     "sigmoid before re-encoding."
 #define kPluginIdentifier "com.nfx.TechnicalGrade"
 #define kPluginVersionMajor 2
-#define kPluginVersionMinor 2
+#define kPluginVersionMinor 3
 
 #define kSupportsTiles false
 #define kSupportsMultiResolution false
@@ -301,6 +302,7 @@ KernelParams TechnicalGradePlugin::buildParams(double p_Time, const OfxRectI& p_
     int workingSpace = CM_SPACE_ACESCCT;
     m_WorkingSpace->getValueAtTime(p_Time, workingSpace);
     params.workingSpace = static_cast<float>(workingSpace);
+    cs::applyWorkingSpaceMatrices(params);
 
     setVignetteGeometry(params, m_Vignette->getValueAtTime(p_Time),
                         static_cast<double>(p_Bounds.x2 - p_Bounds.x1),
@@ -432,10 +434,15 @@ void TechnicalGradePluginFactory::describeInContext(OFX::ImageEffectDescriptor& 
     ChoiceParamDescriptor* space = p_Desc.defineChoiceParam("workingSpace");
     space->setLabels("Working Space", "Working Space", "Working Space");
     space->setScriptName("workingSpace");
-    space->setHint("How the incoming pixels are encoded. Everything is graded in linear AP1 and re-encoded on the way out.");
+    space->setHint("How the incoming pixels are encoded. Camera logs are converted to linear AP1 for the grade and converted back on the way out.");
     space->appendOption("ACEScct");
     space->appendOption("ACEScc");
     space->appendOption("Linear (AP1)");
+    space->appendOption("ARRI LogC3 (EI 800)");
+    space->appendOption("ARRI LogC4");
+    space->appendOption("Sony S-Log3");
+    space->appendOption("Canon C-Log3");
+    space->appendOption("RED Log3G10");
     space->setDefault(CM_SPACE_ACESCCT);
     page->addChild(*space);
 

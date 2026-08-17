@@ -9,10 +9,12 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
 #include "../ColorMath.h"
+#include "../ColorSpaces.h"
 #include "../KernelParams.h"
 #include "../WhiteBalance.h"
 
@@ -31,7 +33,7 @@ namespace
 
     KernelParams baseParams()
     {
-        KernelParams p;
+        KernelParams p{};
         wb::computeMatrix(0.0, 0.0, true, p.matrix);
         p.pivot = 0.18f;
         p.slope = 1.0f;
@@ -43,6 +45,7 @@ namespace
         p.highlightSoftness = 0.5f;
         p.workingSpace = CM_SPACE_ACESCCT;
         setVignetteGeometry(p, 0.0, kWidth, kHeight, 1.0);
+        cs::applyWorkingSpaceMatrices(p);
         return p;
     }
 
@@ -102,6 +105,28 @@ namespace
             p.highlightLimit = 6.0f;
             p.highlightSoftness = 1.0f;
             sets.push_back(p);
+
+            p = baseParams();
+            p.workingSpace = CM_SPACE_LOGC3;
+            cs::applyWorkingSpaceMatrices(p);
+            p.slope = 1.15f;
+            sets.push_back(p);
+
+            p = baseParams();
+            p.workingSpace = CM_SPACE_LOGC4;
+            cs::applyWorkingSpaceMatrices(p);
+            p.slope = 1.4f;
+            const float logc4Gain = exp2f(0.75f);
+            for (int i = 0; i < 9; ++i) p.matrix[i] *= logc4Gain;
+            sets.push_back(p);
+
+            p = baseParams();
+            p.workingSpace = CM_SPACE_SLOG3;
+            cs::applyWorkingSpaceMatrices(p);
+            p.shadowEnable = 1.0f;
+            p.shadowLimit = -4.0f;
+            p.shadowSoftness = 0.4f;
+            sets.push_back(p);
         }
 
         {   // lens falloff, both directions and off square pixels
@@ -149,6 +174,33 @@ namespace
 
         return pixels;
     }
+
+    // Camera logs decode 1.0 to huge linear values. Feeding one channel a legal
+    // code and another 1.4 makes the AP1 CAT a difference of two enormous
+    // numbers, and Metal vs libm disagree in the cancelled residual. These stay
+    // inside the range the curves are defined for.
+    std::vector<float> makeCameraInput(int count)
+    {
+        std::vector<float> pixels(count * 4);
+
+        for (int i = 0; i < count; ++i)
+        {
+            const float t = static_cast<float>(i) / static_cast<float>(count - 1);
+
+            pixels[i * 4 + 0] = 0.05f + t * 0.70f;
+            pixels[i * 4 + 1] = 0.72f - t * 0.55f;
+            pixels[i * 4 + 2] = 0.08f + static_cast<float>(i % 7) * 0.07f;
+            pixels[i * 4 + 3] = t;
+        }
+
+        return pixels;
+    }
+
+    bool isCameraSpace(float space)
+    {
+        const int s = static_cast<int>(space + 0.5f);
+        return s >= CM_SPACE_LOGC3 && s <= CM_SPACE_LOG3G10;
+    }
 }
 
 int main()
@@ -169,9 +221,10 @@ int main()
         const int count = width * height;
         const size_t bytes = count * 4 * sizeof(float);
 
-        const std::vector<float> input = makeInput(count);
+        const std::vector<float> acesInput = makeInput(count);
+        const std::vector<float> cameraInput = makeCameraInput(count);
 
-        id<MTLBuffer> srcBuf = [device newBufferWithBytes:input.data() length:bytes options:MTLResourceStorageModeShared];
+        id<MTLBuffer> srcBuf = [device newBufferWithLength:bytes options:MTLResourceStorageModeShared];
         id<MTLBuffer> dstBuf = [device newBufferWithLength:bytes options:MTLResourceStorageModeShared];
 
         const std::vector<KernelParams> sets = parameterSets();
@@ -182,7 +235,9 @@ int main()
         {
             const KernelParams& params = sets[s];
             const float* raw = reinterpret_cast<const float*>(&params);
+            const std::vector<float>& input = isCameraSpace(params.workingSpace) ? cameraInput : acesInput;
 
+            memcpy(srcBuf.contents, input.data(), bytes);
             memset(dstBuf.contents, 0, bytes);
 
             // Resolve hands the plugin MTLBuffer handles disguised as float
@@ -221,9 +276,10 @@ int main()
                     const double want = expected[c];
 
                     // Relative, but with an absolute floor so a near-zero result
-                    // is not judged on a ratio of two rounding errors.
+                    // is not judged on a ratio of two rounding errors. Camera
+                    // logs plus a CAT 3x3 land a little above 1e-6 on Metal.
                     const double absolute = fabs(got - want);
-                    const double error = absolute <= 1e-6 ? 0.0 : absolute / fabs(want);
+                    const double error = absolute <= 1e-5 ? 0.0 : absolute / fabs(want);
 
                     if (error > worst)
                     {

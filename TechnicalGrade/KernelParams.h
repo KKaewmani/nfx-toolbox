@@ -30,9 +30,13 @@ struct KernelParams
     float vignetteCenterY;
     float vignetteScaleX;       // scales the offset so r reaches 1 in the corners
     float vignetteScaleY;
+
+    // Camera linear RGB <-> ACES AP1. Identity for ACEScct / ACEScc / Linear.
+    float inMatrix[9];
+    float outMatrix[9];
 };
 
-enum { kNumKernelParams = 23 };
+enum { kNumKernelParams = 41 };
 
 static_assert(sizeof(KernelParams) == kNumKernelParams * sizeof(float),
               "KernelParams must stay a flat, padding-free block of floats");

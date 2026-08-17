@@ -1,6 +1,6 @@
 CXXFLAGS = -std=c++14 -O2 -Wall -Wextra
 
-SHARED_HEADERS = ../ColorMath.h ../ColorMathBody.h ../KernelParams.h ../WhiteBalance.h
+SHARED_HEADERS = ../ColorMath.h ../ColorMathBody.h ../ColorSpaces.h ../KernelParams.h ../WhiteBalance.h
 
 .PHONY: run clean metal bundle
 run: test_pipeline compile_metal parity_metal load_plugin
@@ -9,8 +9,8 @@ run: test_pipeline compile_metal parity_metal load_plugin
 	./parity_metal
 	./load_plugin
 
-test_pipeline: test_pipeline.cpp ../WhiteBalance.cpp $(SHARED_HEADERS)
-	$(CXX) $(CXXFLAGS) test_pipeline.cpp ../WhiteBalance.cpp -o $@
+test_pipeline: test_pipeline.cpp ../WhiteBalance.cpp ../ColorSpaces.cpp $(SHARED_HEADERS)
+	$(CXX) $(CXXFLAGS) test_pipeline.cpp ../WhiteBalance.cpp ../ColorSpaces.cpp -o $@
 
 # Compiling the kernel is what proves the shared body is valid MSL as well as
 # valid C++. It goes through the Metal runtime rather than the offline metal
@@ -20,8 +20,8 @@ compile_metal: compile_metal.mm ../MetalSource.h ../ColorMathSource.h
 
 # Links the plugin's own MetalKernel.mm so the parity test drives the identical
 # dispatch Resolve does, buffer-handle-as-float-pointer convention included.
-parity_metal: parity_metal.mm ../MetalKernel.mm ../WhiteBalance.cpp $(SHARED_HEADERS) ../MetalSource.h ../ColorMathSource.h
-	$(CXX) $(CXXFLAGS) -Wno-unused-const-variable parity_metal.mm ../MetalKernel.mm ../WhiteBalance.cpp \
+parity_metal: parity_metal.mm ../MetalKernel.mm ../WhiteBalance.cpp ../ColorSpaces.cpp $(SHARED_HEADERS) ../MetalSource.h ../ColorMathSource.h
+	$(CXX) $(CXXFLAGS) -Wno-unused-const-variable parity_metal.mm ../MetalKernel.mm ../WhiteBalance.cpp ../ColorSpaces.cpp \
 		-o $@ -framework Metal -framework Foundation
 
 # Needs the bundle on disk, so build the plugin first.

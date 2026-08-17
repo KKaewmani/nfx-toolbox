@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "../ColorMath.h"
+#include "../ColorSpaces.h"
 #include "../KernelParams.h"
 #include "../WhiteBalance.h"
 
@@ -56,7 +57,7 @@ namespace
 
     KernelParams defaultParams()
     {
-        KernelParams p;
+        KernelParams p{};
         wb::computeMatrix(0.0, 0.0, true, p.matrix);
         p.pivot = 0.18f;
         p.slope = 1.0f;
@@ -68,7 +69,14 @@ namespace
         p.highlightSoftness = 0.5f;
         p.workingSpace = CM_SPACE_ACESCCT;
         setVignetteGeometry(p, 0.0, kFrameWidth, kFrameHeight, 1.0);
+        cs::applyWorkingSpaceMatrices(p);
         return p;
+    }
+
+    void setSpace(KernelParams& p, int space)
+    {
+        p.workingSpace = static_cast<float>(space);
+        cs::applyWorkingSpaceMatrices(p);
     }
 
     void processAt(const KernelParams& p, double x, double y, float r, float g, float b,
@@ -151,6 +159,31 @@ static void testTransferFunctions()
     const float below = cmLinearToACEScct(0.0078125f * 0.9999f);
     const float above = cmLinearToACEScct(0.0078125f * 1.0001f);
     checkClose(above - below, 0.0, 2e-5, "ACEScct has no step at the toe break");
+
+    for (size_t i = 0; i < samples.size(); ++i)
+    {
+        const float lin = static_cast<float>(samples[i]);
+        checkCloseRelative(cmLogC3ToLinear(cmLinearToLogC3(lin)), lin, 1e-4, "LogC3 linear round trip");
+        checkCloseRelative(cmLogC4ToLinear(cmLinearToLogC4(lin)), lin, 1e-4, "LogC4 linear round trip");
+        checkCloseRelative(cmSLog3ToLinear(cmLinearToSLog3(lin)), lin, 1e-4, "S-Log3 linear round trip");
+        checkCloseRelative(cmCLog3ToLinear(cmLinearToCLog3(lin)), lin, 1e-4, "C-Log3 linear round trip");
+        checkCloseRelative(cmLog3G10ToLinear(cmLinearToLog3G10(lin)), lin, 1e-4, "Log3G10 linear round trip");
+    }
+
+    checkClose(cmLinearToLogC3(0.18f), 0.391006832, 1e-6, "LogC3 EI 800 of middle grey");
+    checkClose(cmLinearToLogC4(0.18f), 0.278395837, 1e-6, "LogC4 of middle grey");
+    checkClose(cmLinearToSLog3(0.18f), 420.0 / 1023.0, 1e-6, "S-Log3 of middle grey");
+    checkClose(cmLinearToCLog3(0.18f), 0.343389370, 1e-6, "C-Log3 of middle grey");
+    checkClose(cmLinearToLog3G10(0.18f), 1.0 / 3.0, 1e-5, "Log3G10 of middle grey");
+
+    checkClose(cmLinearToLogC3(cmLogC3ToLinear(CM_LC3_YCUT)), CM_LC3_YCUT, 1e-6, "LogC3 is continuous at the cut");
+    checkClose(cmLinearToLogC4(CM_C4_T), 0.0, 1e-6, "LogC4 encodes the toe breakpoint at 0");
+    checkClose(cmSLog3ToLinear(cmLinearToSLog3(CM_SL3_LIN_BRK)), CM_SL3_LIN_BRK, 1e-6, "S-Log3 is continuous at the toe");
+    checkClose(cmCLog3ToLinear(cmLinearToCLog3(CM_CL3_IRE * CM_CL3_XBRK)), CM_CL3_IRE * CM_CL3_XBRK, 1e-6,
+               "C-Log3 is continuous at the positive break");
+    checkClose(cmCLog3ToLinear(cmLinearToCLog3(-CM_CL3_IRE * CM_CL3_XBRK)), -CM_CL3_IRE * CM_CL3_XBRK, 1e-6,
+               "C-Log3 is continuous at the negative break");
+    checkClose(cmLog3G10ToLinear(cmLinearToLog3G10(-CM_L3G10_C)), -CM_L3G10_C, 1e-6, "Log3G10 is continuous at zero");
 }
 
 static void testIdentity()
@@ -191,6 +224,63 @@ static void testIdentity()
         const float encoded = cmLinearToACEScc(static_cast<float>(samples[i]));
         process(cc, encoded, encoded, encoded, &r, &g, &b);
         checkClose(r, encoded, 1e-5, "ACEScc passes through untouched");
+    }
+}
+
+static void testCameraWorkingSpaces()
+{
+    section("Camera working spaces");
+
+    const int spaces[] = {
+        CM_SPACE_LOGC3, CM_SPACE_LOGC4, CM_SPACE_SLOG3, CM_SPACE_CLOG3, CM_SPACE_LOG3G10
+    };
+    const char* names[] = { "LogC3", "LogC4", "S-Log3", "C-Log3", "Log3G10" };
+
+    const float tones[][3] = {
+        { 0.18f, 0.18f, 0.18f },
+        { 0.05f, 0.18f, 0.5f },
+        { 1.0f, 0.02f, 0.08f }
+    };
+
+    for (int s = 0; s < 5; ++s)
+    {
+        KernelParams p = defaultParams();
+        setSpace(p, spaces[s]);
+
+        check(fabsf(p.inMatrix[1]) > 1e-4f || fabsf(p.inMatrix[2]) > 1e-4f,
+              std::string(names[s]) + " camera-to-AP1 is not identity");
+
+        const float greyR = (p.inMatrix[0] + p.inMatrix[1] + p.inMatrix[2]) * 0.18f;
+        const float greyG = (p.inMatrix[3] + p.inMatrix[4] + p.inMatrix[5]) * 0.18f;
+        const float greyB = (p.inMatrix[6] + p.inMatrix[7] + p.inMatrix[8]) * 0.18f;
+        checkClose(greyR, greyG, 1e-5, std::string(names[s]) + " keeps a camera grey neutral in AP1");
+        checkClose(greyG, greyB, 1e-5, std::string(names[s]) + " keeps a camera grey neutral in AP1");
+        checkClose(greyR, 0.18, 1e-4, std::string(names[s]) + " maps 0.18 camera grey to 0.18 AP1");
+
+        for (int t = 0; t < 3; ++t)
+        {
+            const float er = cmEncode(tones[t][0], p.workingSpace);
+            const float eg = cmEncode(tones[t][1], p.workingSpace);
+            const float eb = cmEncode(tones[t][2], p.workingSpace);
+
+            float r, g, b;
+            process(p, er, eg, eb, &r, &g, &b);
+            checkClose(r, er, 2e-5, std::string(names[s]) + " identity at defaults");
+            checkClose(g, eg, 2e-5, std::string(names[s]) + " identity at defaults");
+            checkClose(b, eb, 2e-5, std::string(names[s]) + " identity at defaults");
+        }
+
+        KernelParams exposed = p;
+        for (int i = 0; i < 9; ++i)
+        {
+            exposed.matrix[i] *= 2.0f;
+        }
+
+        const float encodedGrey = cmEncode(0.18f, p.workingSpace);
+        float r, g, b;
+        process(exposed, encodedGrey, encodedGrey, encodedGrey, &r, &g, &b);
+        checkCloseRelative(cmDecode(r, p.workingSpace), 0.36, 1e-5,
+                           std::string(names[s]) + " +1 EV doubles linear");
     }
 }
 
@@ -845,6 +935,10 @@ static void testChannelIndependence()
     check(raw[11] == p.shadowEnable, "shadow enable sits at index 11");
     check(raw[14] == p.highlightEnable, "highlight enable sits at index 14");
     check(raw[17] == p.workingSpace, "working space sits at index 17");
+    check(raw[23] == p.inMatrix[0], "inMatrix sits at index 23");
+    check(raw[32] == p.outMatrix[0], "outMatrix sits at index 32");
+    check(raw[23] == 1.0f && raw[27] == 1.0f && raw[31] == 1.0f, "ACES spaces use an identity inMatrix");
+    check(raw[32] == 1.0f && raw[36] == 1.0f && raw[40] == 1.0f, "ACES spaces use an identity outMatrix");
 }
 
 int main()
@@ -853,6 +947,7 @@ int main()
 
     testTransferFunctions();
     testIdentity();
+    testCameraWorkingSpaces();
     testExposure();
     testLensFalloff();
     testContrastPivot();

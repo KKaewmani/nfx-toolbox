@@ -26,7 +26,7 @@ BUNDLE_DIR = $(BUNDLE)/Contents/MacOS/
 SUPPORT_OBJS = ofxsCore.o ofxsImageEffect.o ofxsInteract.o ofxsLog.o ofxsMultiThread.o \
                ofxsParams.o ofxsProperty.o ofxsPropertyValidation.o
 
-PLUGIN_OBJS = TechnicalGradePlugin.o WhiteBalance.o MetalKernel.o
+PLUGIN_OBJS = TechnicalGradePlugin.o WhiteBalance.o ColorSpaces.o MetalKernel.o
 
 $(PLUGIN_NAME).ofx: $(PLUGIN_OBJS) $(SUPPORT_OBJS)
 	$(CXX) $^ -o $@ $(LDFLAGS)
@@ -34,10 +34,13 @@ $(PLUGIN_NAME).ofx: $(PLUGIN_OBJS) $(SUPPORT_OBJS)
 	cp $(PLUGIN_NAME).ofx $(BUNDLE_DIR)
 	cp Info.plist $(BUNDLE)/Contents/
 
-TechnicalGradePlugin.o: TechnicalGradePlugin.cpp TechnicalGradePlugin.h ColorMath.h KernelParams.h WhiteBalance.h
+TechnicalGradePlugin.o: TechnicalGradePlugin.cpp TechnicalGradePlugin.h ColorMath.h ColorSpaces.h KernelParams.h WhiteBalance.h
 	$(CXX) -c $< $(CXXFLAGS)
 
 WhiteBalance.o: WhiteBalance.cpp WhiteBalance.h
+	$(CXX) -c $< $(CXXFLAGS)
+
+ColorSpaces.o: ColorSpaces.cpp ColorSpaces.h ColorMath.h KernelParams.h
 	$(CXX) -c $< $(CXXFLAGS)
 
 MetalKernel.o: MetalKernel.mm KernelParams.h ColorMathSource.h

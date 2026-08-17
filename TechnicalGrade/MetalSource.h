@@ -21,6 +21,8 @@ using namespace metal;
 
 #define CM_LOG2(x)    log2(x)
 #define CM_EXP2(x)    exp2(x)
+#define CM_LOG10(x)   (log2(x) * 0.3010299956639812f)
+#define CM_POW10(x)   exp2((x) * 3.3219280948873626f)
 #define CM_TANH(x)    tanh(x)
 #define CM_MIN(a, b)  fmin(a, b)
 #define CM_MAX(a, b)  fmax(a, b)

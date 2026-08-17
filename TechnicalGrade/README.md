@@ -61,8 +61,9 @@ would need a Developer ID signature and notarisation.
 ## The pipeline
 
 ```
-input (ACEScct / ACEScc / linear AP1)
-  -> decode to scene linear AP1
+input (working-space encoding)
+  -> decode the transfer function to camera-linear RGB
+  -> 3x3 camera RGB -> ACES AP1              ] identity for ACEScct / ACEScc / Linear
   -> exposure gain, 2^EV                     ] folded into one 3x3
   -> lens falloff, a radial gain             ] and a scalar
   -> white balance, Bradford adaptation      ]
@@ -70,7 +71,8 @@ input (ACEScct / ACEScc / linear AP1)
   -> contrast, a slope in that log space
   -> shadow limiter, sigmoid
   -> highlight limiter, sigmoid
-  -> back to linear
+  -> back to linear AP1
+  -> 3x3 AP1 -> camera RGB
   -> re-encode to the working space
 ```
 
@@ -78,8 +80,9 @@ Exposure and white balance are both linear operations, so they collapse into a
 single 3x3 matrix that is computed once per frame on the CPU. The falloff sits
 between them but is one scalar applied to all three channels, and a scalar
 commutes with a matrix, so it is applied to the result rather than to the input.
-The kernel does one matrix multiply, one radial gain and three scalar tone curves
-per pixel.
+Camera-to-AP1 and AP1-to-camera stay as their own multiplies because the tone
+curve between them is nonlinear. The kernel does three matrix multiplies, one
+radial gain and three scalar tone curves per pixel.
 
 Alpha is passed through untouched.
 
@@ -87,7 +90,7 @@ Alpha is passed through untouched.
 
 | Control | Range | Default | Notes |
 | --- | --- | --- | --- |
-| Working Space | ACEScct, ACEScc, Linear AP1 | ACEScct | How the incoming pixels are encoded |
+| Working Space | ACEScct, ACEScc, Linear AP1, LogC3 EI 800, LogC4, S-Log3, C-Log3, Log3G10 | ACEScct | Encoding in and out. Camera logs are converted to AP1 for the grade |
 | Exposure | -6 to +6 EV | 0 | Linear gain of 2^EV |
 | Corner Exposure | -4 to +4 EV | 0 | Lens falloff. Positive opens the corners up, negative darkens them |
 | Temperature | -6000 to +4500 | 0 | Relative warm/cool trim, positive warms |
@@ -122,6 +125,12 @@ rounding, which is a few parts per million, or about 3e-6 of a stop.
 
 Pick the setting that matches your Resolve colour science. If the node is fed
 linear AP1 directly, choose Linear and no encoding is applied.
+
+Camera logs use the vendor curve, then a 3x3 from that camera RGB into ACES AP1
+(CAT02, matching the ACES IDT convention) so the grade itself always runs in
+AP1. The inverse 3x3 and the same curve go back on the way out. LogC3 is the
+EI 800 curve only. S-Log3 is paired with S-Gamut3.Cine, C-Log3 with Cinema
+Gamut, LogC4 with AWG4, LogC3 with AWG3, Log3G10 with REDWideGamutRGB.
 
 ### White balance
 
@@ -327,7 +336,8 @@ Nothing in the limiter range gets anywhere near that.
 | `ColorMathSource.h` | Generated. The body wrapped in a raw string literal for Metal |
 | `MetalSource.h` | Metal prelude, the kernel, and the assembly of the full shader |
 | `MetalKernel.mm` | Metal dispatch and the pipeline state cache |
-| `KernelParams.h` | The 23 float parameter block shared by both paths, and the falloff geometry |
+| `KernelParams.h` | The 41 float parameter block shared by both paths, and the falloff geometry |
+| `ColorSpaces.h/.cpp` | Camera RGB <-> AP1 3x3s from chromaticities and CAT02. CPU only |
 | `WhiteBalance.h/.cpp` | Mired, CCT, Duv and Bradford. CPU only, once per frame |
 | `TechnicalGradePlugin.h/.cpp` | OFX factory, parameters, render, CPU path |
 
