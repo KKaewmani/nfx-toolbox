@@ -160,13 +160,13 @@ public:
 
     virtual void render(const OFX::RenderArguments& p_Args);
     virtual bool isIdentity(const OFX::IsIdentityArguments& p_Args, OFX::Clip*& p_IdentityClip, double& p_IdentityTime);
-    virtual void changedParam(const OFX::InstanceChangedArgs& p_Args, const std::string& p_ParamName);
 
     void setupAndProcess(TechnicalGradeProcessor& p_Processor, const OFX::RenderArguments& p_Args);
 
 private:
     KernelParams buildParams(double p_Time, const OfxRectI& p_Bounds, double p_PixelAspect);
-    void setEnabledness();
+    bool highlightLimiterOn(double p_Time);
+    bool shadowLimiterOn(double p_Time);
 
     // Does not own the following pointers
     OFX::Clip* m_DstClip;
@@ -208,8 +208,6 @@ TechnicalGradePlugin::TechnicalGradePlugin(OfxImageEffectHandle p_Handle)
     m_HighlightEnable = fetchBooleanParam("highlightEnable");
     m_HighlightLimit = fetchDoubleParam("highlightLimit");
     m_HighlightSoftness = fetchDoubleParam("highlightSoftness");
-
-    setEnabledness();
 }
 
 void TechnicalGradePlugin::render(const OFX::RenderArguments& p_Args)
@@ -233,13 +231,11 @@ bool TechnicalGradePlugin::isIdentity(const OFX::IsIdentityArguments& p_Args, OF
     const double temperature = m_Temperature->getValueAtTime(p_Args.time);
     const double tint = m_Tint->getValueAtTime(p_Args.time);
     const double contrast = m_Contrast->getValueAtTime(p_Args.time);
-    const bool shadow = m_ShadowEnable->getValueAtTime(p_Args.time);
-    const bool highlight = m_HighlightEnable->getValueAtTime(p_Args.time);
 
     // The pivot is only observable through contrast or the limiters, so it is
     // deliberately absent from this test.
     if ((exposure == 0.0) && (vignette == 0.0) && (temperature == 0.0) && (tint == 0.0) &&
-        (contrast == 0.0) && !shadow && !highlight)
+        (contrast == 0.0) && !shadowLimiterOn(p_Args.time) && !highlightLimiterOn(p_Args.time))
     {
         p_IdentityClip = m_SrcClip;
         p_IdentityTime = p_Args.time;
@@ -249,23 +245,24 @@ bool TechnicalGradePlugin::isIdentity(const OFX::IsIdentityArguments& p_Args, OF
     return false;
 }
 
-void TechnicalGradePlugin::changedParam(const OFX::InstanceChangedArgs& /*p_Args*/, const std::string& p_ParamName)
+bool TechnicalGradePlugin::highlightLimiterOn(double p_Time)
 {
-    if ((p_ParamName == "shadowEnable") || (p_ParamName == "highlightEnable"))
+    // Hidden enable flag keeps old nodes that had the checkbox on. New ones
+    // engage by pulling the limit in from the default end of the slider.
+    if (m_HighlightEnable->getValueAtTime(p_Time))
     {
-        setEnabledness();
+        return true;
     }
+    return m_HighlightLimit->getValueAtTime(p_Time) < kMaxLimiterEV - 1e-6;
 }
 
-void TechnicalGradePlugin::setEnabledness()
+bool TechnicalGradePlugin::shadowLimiterOn(double p_Time)
 {
-    const bool shadow = m_ShadowEnable->getValue();
-    m_ShadowLimit->setEnabled(shadow);
-    m_ShadowSoftness->setEnabled(shadow);
-
-    const bool highlight = m_HighlightEnable->getValue();
-    m_HighlightLimit->setEnabled(highlight);
-    m_HighlightSoftness->setEnabled(highlight);
+    if (m_ShadowEnable->getValueAtTime(p_Time))
+    {
+        return true;
+    }
+    return m_ShadowLimit->getValueAtTime(p_Time) > -kMaxLimiterEV + 1e-6;
 }
 
 KernelParams TechnicalGradePlugin::buildParams(double p_Time, const OfxRectI& p_Bounds, double p_PixelAspect)
@@ -291,11 +288,11 @@ KernelParams TechnicalGradePlugin::buildParams(double p_Time, const OfxRectI& p_
     params.pivot = static_cast<float>(m_Pivot->getValueAtTime(p_Time));
     params.slope = static_cast<float>(exp2(m_Contrast->getValueAtTime(p_Time)));
 
-    params.shadowEnable = m_ShadowEnable->getValueAtTime(p_Time) ? 1.0f : 0.0f;
+    params.shadowEnable = shadowLimiterOn(p_Time) ? 1.0f : 0.0f;
     params.shadowLimit = static_cast<float>(m_ShadowLimit->getValueAtTime(p_Time));
     params.shadowSoftness = static_cast<float>(m_ShadowSoftness->getValueAtTime(p_Time));
 
-    params.highlightEnable = m_HighlightEnable->getValueAtTime(p_Time) ? 1.0f : 0.0f;
+    params.highlightEnable = highlightLimiterOn(p_Time) ? 1.0f : 0.0f;
     params.highlightLimit = static_cast<float>(m_HighlightLimit->getValueAtTime(p_Time));
     params.highlightSoftness = static_cast<float>(m_HighlightSoftness->getValueAtTime(p_Time));
 
@@ -446,10 +443,10 @@ void TechnicalGradePluginFactory::describeInContext(OFX::ImageEffectDescriptor& 
     space->setDefault(CM_SPACE_ACESCCT);
     page->addChild(*space);
 
-    // Exposure --------------------------------------------------------------
-    GroupParamDescriptor* exposureGroup = p_Desc.defineGroupParam("exposureGroup");
-    exposureGroup->setLabels("Exposure", "Exposure", "Exposure");
-    exposureGroup->setHint("Uniform gain and radial falloff, both in stops.");
+    // Exposure / white balance ----------------------------------------------
+    GroupParamDescriptor* exposureGroup = p_Desc.defineGroupParam("exposureWhiteBalance");
+    exposureGroup->setLabels("Exposure / White Balance", "Exposure / White Balance", "Exposure / White Balance");
+    exposureGroup->setHint("Uniform gain, radial falloff and chromatic adaptation.");
     page->addChild(*exposureGroup);
 
     DoubleParamDescriptor* param = defineDouble(p_Desc, "exposure", "Exposure (EV)",
@@ -464,34 +461,28 @@ void TechnicalGradePluginFactory::describeInContext(OFX::ImageEffectDescriptor& 
         0.0, -kMaxVignetteEV, kMaxVignetteEV, 0.05, exposureGroup);
     page->addChild(*param);
 
-    // White balance ---------------------------------------------------------
-    GroupParamDescriptor* wbGroup = p_Desc.defineGroupParam("whiteBalance");
-    wbGroup->setLabels("White Balance", "White Balance", "White Balance");
-    wbGroup->setHint("Chromatic adaptation driven by the assumed colour temperature of the scene.");
-    page->addChild(*wbGroup);
-
     param = defineDouble(p_Desc, "temperature", "Temperature",
         "Relative warm/cool trim, as an offset rather than an absolute reading. "
         "Positive warms the image, negative cools it. One hundred units is the same "
         "size of shift wherever you are on the range, worth about 100 K at the "
         "middle of it.",
-        0.0, wb::kMinTemperatureOffset, wb::kMaxTemperatureOffset, 100.0, wbGroup);
+        0.0, wb::kMinTemperatureOffset, wb::kMaxTemperatureOffset, 100.0, exposureGroup);
     page->addChild(*param);
 
     param = defineDouble(p_Desc, "tint", "Tint",
         "Green/magenta trim across the Planckian locus. Positive is magenta, negative is green.",
-        0.0, -100.0, 100.0, 0.5, wbGroup);
+        0.0, -100.0, 100.0, 0.5, exposureGroup);
     page->addChild(*param);
 
     BooleanParamDescriptor* boolParam = defineBoolean(p_Desc, "preserveExposure", "Preserve Exposure",
         "Normalise the balance so a neutral holds its luminance, changing colour without changing brightness.",
-        true, wbGroup);
+        true, exposureGroup);
     page->addChild(*boolParam);
 
-    // Contrast --------------------------------------------------------------
-    GroupParamDescriptor* toneGroup = p_Desc.defineGroupParam("tone");
-    toneGroup->setLabels("Contrast", "Contrast", "Contrast");
-    toneGroup->setHint("Slope of the log2 exposure response about middle grey.");
+    // Tonal range -----------------------------------------------------------
+    GroupParamDescriptor* toneGroup = p_Desc.defineGroupParam("tonalRange");
+    toneGroup->setLabels("Tonal Range", "Tonal Range", "Tonal Range");
+    toneGroup->setHint("Contrast and limiters, all relative to the same middle grey.");
     page->addChild(*toneGroup);
 
     param = defineDouble(p_Desc, "middleGrey", "Middle Grey",
@@ -506,39 +497,37 @@ void TechnicalGradePluginFactory::describeInContext(OFX::ImageEffectDescriptor& 
         0.0, -kContrastRangeEV, kContrastRangeEV, 0.01, toneGroup);
     page->addChild(*param);
 
-    // Limiters --------------------------------------------------------------
-    GroupParamDescriptor* limitGroup = p_Desc.defineGroupParam("limiters");
-    limitGroup->setLabels("Limiters", "Limiters", "Limiters");
-    limitGroup->setHint("Sigmoid roll-off that bounds how far the image may travel from middle grey.");
-    page->addChild(*limitGroup);
-
-    boolParam = defineBoolean(p_Desc, "highlightEnable", "Enable Highlight Limiter",
-        "Bound how far above middle grey the image may go.", false, limitGroup);
-    page->addChild(*boolParam);
-
     param = defineDouble(p_Desc, "highlightLimit", "Highlight Limit (EV)",
-        "Ceiling in stops above middle grey. The curve approaches it without ever reaching it.",
-        kMaxLimiterEV, kMinLimiterEV, kMaxLimiterEV, 0.05, limitGroup);
+        "Ceiling in stops above middle grey. At the default +8 the limiter is off; "
+        "pull it down to engage. The curve approaches the limit without ever reaching it.",
+        kMaxLimiterEV, kMinLimiterEV, kMaxLimiterEV, 0.05, toneGroup);
     page->addChild(*param);
 
     param = defineDouble(p_Desc, "highlightSoftness", "Highlight Softness",
         "How far down towards middle grey the roll-off begins. At 1 it starts at middle grey itself.",
-        0.5, kMinSoftness, 1.0, 0.01, limitGroup);
+        0.5, kMinSoftness, 1.0, 0.01, toneGroup);
     page->addChild(*param);
 
-    boolParam = defineBoolean(p_Desc, "shadowEnable", "Enable Shadow Limiter",
-        "Bound how far below middle grey the image may go.", false, limitGroup);
-    page->addChild(*boolParam);
-
     param = defineDouble(p_Desc, "shadowLimit", "Shadow Limit (EV)",
-        "Floor in stops below middle grey. The curve approaches it without ever reaching it.",
-        -kMaxLimiterEV, -kMaxLimiterEV, -kMinLimiterEV, 0.05, limitGroup);
+        "Floor in stops below middle grey. At the default -8 the limiter is off; "
+        "pull it up to engage. The curve approaches the limit without ever reaching it.",
+        -kMaxLimiterEV, -kMaxLimiterEV, -kMinLimiterEV, 0.05, toneGroup);
     page->addChild(*param);
 
     param = defineDouble(p_Desc, "shadowSoftness", "Shadow Softness",
         "How far up towards middle grey the roll-off begins. At 1 it starts at middle grey itself.",
-        0.5, kMinSoftness, 1.0, 0.01, limitGroup);
+        0.5, kMinSoftness, 1.0, 0.01, toneGroup);
     page->addChild(*param);
+
+    // Kept so existing projects that stored the old checkboxes still load.
+    // Hidden: they do not skip GPU work, they only gate the per-pixel tanh.
+    boolParam = defineBoolean(p_Desc, "highlightEnable", "Enable Highlight Limiter",
+        "Bound how far above middle grey the image may go.", false, 0);
+    boolParam->setIsSecret(true);
+
+    boolParam = defineBoolean(p_Desc, "shadowEnable", "Enable Shadow Limiter",
+        "Bound how far below middle grey the image may go.", false, 0);
+    boolParam->setIsSecret(true);
 }
 
 ImageEffect* TechnicalGradePluginFactory::createInstance(OfxImageEffectHandle p_Handle, ContextEnum /*p_Context*/)

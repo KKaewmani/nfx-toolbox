@@ -94,18 +94,16 @@ Alpha is passed through untouched.
 | Control | Range | Default | Notes |
 | --- | --- | --- | --- |
 | Working Space | ACEScct, ACEScc, Linear AP1, LogC3 EI 800, LogC4, S-Log3, C-Log3, Log3G10 | ACEScct | Encoding in and out. Camera logs are converted to AP1 for the grade |
-| Exposure | -6 to +6 EV | 0 | Linear gain of 2^EV |
+| Exposure (EV) | -6 to +6 EV | 0 | Linear gain of 2^EV. In Exposure / White Balance |
 | Lens Falloff (Vignette) | -4 to +4 EV | 0 | Radial exposure. Positive opens the corners up, negative darkens them |
 | Temperature | -6000 to +4500 | 0 | Relative warm/cool trim, positive warms |
 | Tint | -100 to +100 | 0 | Positive is magenta, negative is green |
 | Preserve Exposure | on/off | on | Holds neutral luminance across the balance |
-| Middle Grey | 0.045 to 0.72 | 0.18 | Linear pivot; ends are ±2 stops from 0.18 |
-| Contrast | -1 to +1 | 0 | Stops of slope, so 0 is unchanged |
-| Highlight Limiter | off/on | off | |
-| Highlight Limit | +2 to +8 EV | +8 | Ceiling, in stops above middle grey |
+| Middle Grey | 0.045 to 0.72 | 0.18 | Linear pivot for contrast and limiters; ends are ±2 stops from 0.18 |
+| Contrast | -1 to +1 | 0 | Stops of slope, so 0 is unchanged. In Tonal Range with the limiters |
+| Highlight Limit | +2 to +8 EV | +8 | Off at +8; pull down to engage. Ceiling in stops above middle grey |
 | Highlight Softness | 0.2 to 1 | 0.5 | 1 rolls off all the way from middle grey |
-| Shadow Limiter | off/on | off | |
-| Shadow Limit | -8 to -2 EV | -8 | Floor, in stops below middle grey |
+| Shadow Limit | -8 to -2 EV | -8 | Off at -8; pull up to engage. Floor in stops below middle grey |
 | Shadow Softness | 0.2 to 1 | 0.5 | 1 rolls off all the way from middle grey |
 
 At their defaults every control is neutral, and the plugin reports itself as a
@@ -268,8 +266,14 @@ measure from. The kernel still works in stops relative to that number.
 
 ### Limiters
 
-Both limiters work in EV relative to the pivot. Given a limit `L` and a softness
-`s`, the knee sits at `t = L * (1 - s)`, and past it the curve is
+Both limiters work in EV relative to the same middle grey as contrast. There is
+no enable checkbox: that flag only skipped a `tanh` inside the kernel, which
+does not make the GPU faster. At the default ends of the sliders (+8 and -8) the
+limiter is off, so a fresh node stays a pass-through. Pull Highlight Limit down
+or Shadow Limit up to turn it on.
+
+Given a limit `L` and a softness `s`, the knee sits at `t = L * (1 - s)`, and
+past it the curve is
 
 ```
 y = t + (L - t) * tanh((e - t) / (L - t))

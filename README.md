@@ -70,30 +70,28 @@ Sony S-Log3, Canon C-Log3 or RED Log3G10. Camera logs are converted to AP1 for
 the grade (and back on the way out) so white balance stays an AP1 Bradford CAT.
 Everything downstream happens in linear whichever you pick.
 
-**Exposure**, -6 to +6 EV. A linear gain of 2^EV applied to all three channels.
-**Lens Falloff (Vignette)**, -4 to +4 EV, in the same Exposure section. A radial
-exposure change: nothing at the centre, the full amount at the corners, following
-`2^(EV * r^2)`. That profile is the physical `cos^4` falloff law to second order,
-so positive values genuinely cancel a lens that darkens the corners and negative
-values emulate one. The radius is measured with the pixel aspect ratio applied,
-so it stays circular on anamorphic material instead of stretching to the format.
+**Exposure / White Balance.** Exposure -6 to +6 EV, a linear gain of 2^EV.
+Lens Falloff (Vignette) -4 to +4 EV, a radial exposure change: nothing at the
+centre, the full amount at the corners, following `2^(EV * r^2)`. That profile
+is the physical `cos^4` falloff law to second order, so positive values
+genuinely cancel a lens that darkens the corners and negative values emulate
+one. The radius is measured with the pixel aspect ratio applied, so it stays
+circular on anamorphic material instead of stretching to the format.
+Temperature and Tint, both -100 to +100 per notch. Temperature is a relative
+offset rather than an absolute Kelvin reading, because nothing here knows what
+the scene was lit by. It steps in mired, so the same movement shifts colour by
+the same perceptual amount anywhere on the range. Bradford chromatic adaptation
+underneath. **Preserve Exposure** holds neutral luminance so the control changes
+colour without changing brightness.
 
-**White Balance**, Temperature and Tint, both -100 to +100 per notch. Temperature
-is a relative offset rather than an absolute Kelvin reading, because nothing here
-knows what the scene was lit by. It steps in mired, so the same movement shifts
-colour by the same perceptual amount anywhere on the range. Bradford chromatic
-adaptation underneath. **Preserve Exposure** holds neutral luminance so the
-control changes colour without changing brightness.
-
-**Contrast**, Middle Grey 0.045 to 0.72 (default 0.18, the linear pivot; ends are
-±2 stops), and Contrast -1 to +1 in stops. Contrast is the slope in log2
-exposure, so 0 leaves the image alone and +1 doubles the stops between any two
-tones.
-
-**Limiters**, Highlight +2 to +8 EV and Shadow -8 to -2 EV, each with a softness
-of 0.2 to 1. A tanh sigmoid that leaves the knee at exactly the slope it arrived
-with and approaches the limit asymptotically, so there is no flat clipped region
-and no visible crease at the join.
+**Tonal Range.** Middle Grey 0.045 to 0.72 (default 0.18, the linear pivot; ends
+are ±2 stops), Contrast -1 to +1 in stops, and highlight/shadow limiters. Contrast
+is the slope in log2 exposure, so 0 leaves the image alone and +1 doubles the
+stops between any two tones. Highlight Limit +2 to +8 EV and Shadow Limit -8 to
+-2 EV, each with a softness of 0.2 to 1. At +8 / -8 the limiter is off; pull the
+slider inward to engage. A tanh sigmoid that leaves the knee at exactly the slope
+it arrived with and approaches the limit asymptotically, so there is no flat
+clipped region and no visible crease at the join.
 
 Two behaviours worth knowing in use. Negative values, which AP1 legitimately
 carries in deep shadows and outside the gamut, are never driven further negative
