@@ -6,10 +6,43 @@ contrast and highlight/shadow limiting in ACES.
 
 ## How to install
 
-macOS only, **DaVinci Resolve Studio** (the free version does not load third-party
-OpenFX). You need the [Xcode command line tools](https://developer.apple.com/download/all/?q=command%20line%20tools)
-(`xcode-select --install` if `make` is missing). The OpenFX SDK is already in
-this repo.
+macOS 11 or newer, **DaVinci Resolve Studio** (the free version does not load
+third-party OpenFX). Apple Silicon and Intel both work from the same bundle.
+
+You only need `TechnicalGrade.ofx.bundle`. It is the whole plugin: nothing else
+to install, no Xcode, no compile. The git repo does not include it; send or
+download that folder (a zip is fine).
+
+1. Open the bundle’s parent folder so you can see `TechnicalGrade.ofx.bundle`.
+2. In Finder choose **Go → Go to Folder…** and paste:
+
+   ```
+   /Library/OFX/Plugins
+   ```
+
+   If macOS says that folder does not exist, go to `/Library`, create a folder
+   named `OFX`, and inside it create `Plugins`.
+3. Copy `TechnicalGrade.ofx.bundle` and paste it into `Plugins`. macOS will ask
+   for an administrator password.
+4. **Quit DaVinci Resolve completely and open it again.** Plugins are only
+   scanned at launch.
+5. In the Color page, OpenFX library, look under **NFX Toolbox** for
+   **Technical Grade**.
+
+If the effect does not appear after a restart, macOS has quarantined the file
+(typical after a download, AirDrop, mail or a cloud folder). Paste this into
+Terminal, press Return, and restart Resolve once more:
+
+```bash
+sudo xattr -dr com.apple.quarantine /Library/OFX/Plugins/TechnicalGrade.ofx.bundle
+```
+
+USB copy, `scp` and `rsync` do not set that tag.
+
+### From this repository (developers)
+
+Xcode command line tools (`xcode-select --install` if `make` is missing). The
+OpenFX SDK is already in the repo.
 
 ```bash
 cd TechnicalGrade
@@ -17,21 +50,7 @@ make
 sudo make install
 ```
 
-That builds a universal `TechnicalGrade.ofx.bundle` (Apple Silicon and Intel) and
-copies it to `/Library/OFX/Plugins`, which is where Resolve looks. **Quit and
-reopen Resolve** afterwards; it only scans plugins at launch. The effect appears
-in the OpenFX library under **NFX Toolbox** as **Technical Grade**.
-
-If you were given the `.ofx.bundle` itself rather than this repo, skip `make`
-and copy it into the same folder, then clear Gatekeeper’s quarantine tag if the
-file arrived by download, AirDrop or mail:
-
-```bash
-sudo cp -R TechnicalGrade.ofx.bundle /Library/OFX/Plugins/
-sudo xattr -dr com.apple.quarantine /Library/OFX/Plugins/TechnicalGrade.ofx.bundle
-```
-
-`scp`, `rsync` or a USB stick do not set that tag. Restart Resolve either way.
+Then restart Resolve, same as above.
 
 | | |
 | --- | --- |

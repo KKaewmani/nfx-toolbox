@@ -31,14 +31,17 @@ will happily list both.
 
 ## Installing on another machine
 
-`TechnicalGrade.ofx.bundle` is the whole plugin. It links nothing but system
-frameworks and is universal, so the same bundle runs on Apple Silicon and Intel
-with no toolchain, no runtime and no build on the far end. Copy it into
-`/Library/OFX/Plugins` and restart Resolve.
+`TechnicalGrade.ofx.bundle` is the whole plugin. Non-technical users do not need
+this repo or a compiler: copy that folder into `/Library/OFX/Plugins` in Finder
+(**Go → Go to Folder…**), authenticate, and restart Resolve Studio. Step-by-step
+is at the top of the [root README](../README.md#how-to-install).
+
+It links nothing but system frameworks and is universal, so the same bundle runs
+on Apple Silicon and Intel. From Terminal:
 
 ```bash
 sudo cp -R TechnicalGrade.ofx.bundle /Library/OFX/Plugins/
-xattr -dr com.apple.quarantine /Library/OFX/Plugins/TechnicalGrade.ofx.bundle
+sudo xattr -dr com.apple.quarantine /Library/OFX/Plugins/TechnicalGrade.ofx.bundle
 ```
 
 Three things decide whether it appears:
