@@ -70,6 +70,7 @@ input (working-space encoding)
   -> exposure gain, 2^EV                     ] folded into one 3x3
   -> lens falloff, a radial gain             ] and a scalar
   -> white balance, Bradford adaptation      ]
+  -> primary sat / hue, AP1 3x3              ]
   -> log2 exposure relative to the pivot
   -> contrast, a slope in that log space
   -> shadow limiter, sigmoid
@@ -98,19 +99,20 @@ Alpha is passed through untouched.
 | Lens Falloff (Vignette) | -4 to +4 EV | 0 | Radial exposure. Positive opens the corners up, negative darkens them |
 | Temperature | -6000 to +4500 | 0 | Relative warm/cool trim, positive warms |
 | Tint | -100 to +100 | 0 | Positive is magenta, negative is green |
-| Middle Grey | 0.045 to 0.72 | 0.18 | Linear pivot for contrast and limiters; ends are ±2 stops from 0.18 |
+| R/G/B Sat | 0.5 to 1.5 | 1 | Length of the white-to-primary vector in CIE 1960 uv |
+| R/G/B Hue Shift | 0.5 to 1.5 | 1 | Right-hand offset of that vector, same units |
+| Middle Grey | −2 to +2 EV | 0 | Stops around linear 0.18 (−2 is 0.045, +2 is 0.72) |
 | Contrast | -1 to +1 | 0 | Stops of slope, so 0 is unchanged. In Tonal Range with the limiters |
 | Highlight Limit | +2 to +8 EV | +8 | Off at +8; pull down to engage. Ceiling in stops above middle grey |
-| Highlight Softness | 0.2 to 1 | 0.5 | 1 rolls off all the way from middle grey |
+| Highlight Softness | 0.2 to 1 | 0.6 | 1 rolls off all the way from middle grey |
 | Shadow Limit | -8 to -2 EV | -8 | Off at -8; pull up to engage. Floor in stops below middle grey |
-| Shadow Softness | 0.2 to 1 | 0.5 | 1 rolls off all the way from middle grey |
+| Shadow Softness | 0.2 to 1 | 0.6 | 1 rolls off all the way from middle grey |
 
 At their defaults every control is neutral, and the plugin reports itself as a
 pass through so Resolve skips it entirely.
 
-Exposure and Contrast are set in stops. Middle Grey is the linear pivot itself,
-so the slider reads 0.18 at rest rather than 0 EV around 0.18. The ends are still
-two stops either side (0.045 and 0.72).
+Exposure, Contrast and Middle Grey are set in stops. Middle Grey is 0 at rest,
+which is linear 0.18; −2 is 0.045 and +2 is 0.72.
 
 ## Colour science notes
 
@@ -191,6 +193,17 @@ meaning anything and can produce negative gains. When that happens the tint is
 quietly pulled back to the largest value that keeps all three tristimulus values
 positive, so the slider saturates instead of breaking.
 
+### Primaries
+
+Each AP1 primary is moved in CIE 1960 uv around the ACES white. Sat scales the
+white-to-primary vector; Hue Shift offsets it to the right of that axis
+(clockwise in uv), by the same fraction of the original length. The three new
+xy points and the unchanged ACES white define an RGB space (full NPM). The
+grade 3x3 is `XYZ_to_AP1 * XYZ_from_adjusted`, so a grey stays a grey. Unmoved
+primaries stay on-axis; their amounts change so the three still sum to white.
+All sliders at 1 are a bit-exact identity. That matrix is left-multiplied onto
+the exposure / white-balance matrix on the CPU.
+
 ### Lens falloff
 
 An exposure gain that varies with distance from the centre of the frame: nothing
@@ -247,7 +260,8 @@ e' = e * slope
 The pivot is a fixed point for any slope, which is the property that makes middle
 grey stay put while everything else fans out around it.
 
-The pivot is a linear number (0.18 at rest). Contrast is the slope in stops,
+The pivot is a linear number (0.18 at rest). The inspector slider is in stops
+around that, so 0 is 0.18 and the ends are two stops either side. Contrast is the slope in stops,
 so the slider value `c` gives a slope of `2^c`: 0 leaves the image alone, +1
 doubles the stops between any two tones, -1 halves them. Setting it this way
 makes the control symmetric, so +0.5 and -0.5 are equal and opposite, which a
@@ -259,9 +273,9 @@ the tests still exercise it from 0.25 to 4, but nothing past a stop was usable i
 practice and carrying the unusable ends cost precision across the part of the
 range that gets touched.
 
-Middle Grey is the linear pivot: 0.18 at rest, 0.045 two stops down, 0.72 two
-stops up. Moving it moves both the contrast fulcrum and the origin the limiters
-measure from. The kernel still works in stops relative to that number.
+Middle Grey is in stops around the linear pivot: 0 is 0.18, −2 is 0.045, +2 is
+0.72. Moving it moves both the contrast fulcrum and the origin the limiters
+measure from. The kernel still works in stops relative to the linear number.
 
 ### Limiters
 
@@ -344,6 +358,7 @@ Nothing in the limiter range gets anywhere near that.
 | `MetalKernel.mm` | Metal dispatch and the pipeline state cache |
 | `KernelParams.h` | The 41 float parameter block shared by both paths, and the falloff geometry |
 | `ColorSpaces.h/.cpp` | Camera RGB <-> AP1 3x3s from chromaticities and CAT02. CPU only |
+| `Saturation.h/.cpp` | AP1 primary sat / hue in CIE 1960 uv. CPU only, folded into the grade 3x3 |
 | `WhiteBalance.h/.cpp` | Mired, CCT, Duv and Bradford. CPU only, once per frame |
 | `TechnicalGradePlugin.h/.cpp` | OFX factory, parameters, render, CPU path |
 
@@ -358,7 +373,7 @@ maths to forget to update.
 The slider-to-kernel conversions live in the plugin, not the kernel. Contrast
 stops become a slope, and the temperature offset becomes a matrix, all once per
 frame on the CPU, so the interface can be reshaped without touching the
-per-pixel code. Middle Grey is already linear and is passed through.
+per-pixel code. Middle Grey stops become the linear pivot `0.18 * 2^EV`.
 
 ## Tests
 

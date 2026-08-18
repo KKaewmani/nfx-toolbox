@@ -59,7 +59,7 @@ Then restart Resolve, same as above.
 
 ## Technical Grade
 
-Appears under **NFX Toolbox** in Resolve's OpenFX library. Current version 2.3.
+Appears under **NFX Toolbox** in Resolve's OpenFX library. Current version 2.4.
 
 The plugin decodes to scene-linear ACES AP1, does every operation there, and
 re-encodes on the way out, so each control does the thing its name suggests
@@ -83,11 +83,18 @@ the scene was lit by. It steps in mired, so the same movement shifts colour by
 the same perceptual amount anywhere on the range. Bradford chromatic adaptation
 underneath; a grey card keeps its brightness while its colour moves.
 
-**Tonal Range.** Middle Grey 0.045 to 0.72 (default 0.18, the linear pivot; ends
-are ±2 stops), Contrast -1 to +1 in stops, and highlight/shadow limiters. Contrast
+**Primaries.** R/G/B Sat and Hue Shift, each 0.5 to 1.5, default 1. Sat scales
+the ACES-white to AP1-primary vector in CIE 1960 uv (1.1 is 10% longer). Hue
+Shift offsets that primary to the right of its axis by the same fraction. The
+result is one AP1 3×3, folded into the exposure / white-balance matrix.
+A grey stays a grey. Unmoved primaries stay on-axis; their amounts change so
+the three still sum to white.
+
+**Tonal Range.** Middle Grey −2 to +2 EV (default 0, which is linear 0.18).
+Contrast −1 to +1 in stops, and highlight/shadow limiters. Contrast
 is the slope in log2 exposure, so 0 leaves the image alone and +1 doubles the
 stops between any two tones. Highlight Limit +2 to +8 EV and Shadow Limit -8 to
--2 EV, each with a softness of 0.2 to 1. At +8 / -8 the limiter is off; pull the
+-2 EV, each with a softness of 0.2 to 1 (default 0.6). At +8 / -8 the limiter is off; pull the
 slider inward to engage. A tanh sigmoid that leaves the knee at exactly the slope
 it arrived with and approaches the limit asymptotically, so there is no flat
 clipped region and no visible crease at the join.

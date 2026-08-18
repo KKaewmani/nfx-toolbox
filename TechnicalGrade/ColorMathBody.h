@@ -394,6 +394,14 @@ CM_INLINE float cmTone(float lin, float pivot, float slope,
                        float shadowEnable, float shadowLimit, float shadowSoftness,
                        float highlightEnable, float highlightLimit, float highlightSoftness)
 {
+    // Contrast 0 is a slope of exactly 1. Skip the log2/exp2 round trip when
+    // nothing else is happening either: it is the common path for exposure,
+    // white balance, sat and falloff, and it must stay bit-exact.
+    if (slope == 1.0f && shadowEnable <= 0.5f && highlightEnable <= 0.5f)
+    {
+        return lin;
+    }
+
     if (lin <= 0.0f)
     {
         return (shadowEnable > 0.5f) ? (pivot * CM_EXP2(shadowLimit)) : lin;
@@ -479,9 +487,14 @@ CM_INLINE void cmProcessPixel(float inR, float inG, float inB, float x, float y,
     // Camera RGB is converted to AP1 before the grade so white balance, which
     // is an AP1 Bradford CAT, and any future AP1 operator see the same space.
     // The tone curve is nonlinear, so the return matrix cannot be folded in.
-    const float ar = p[23] * lr + p[24] * lg + p[25] * lb;
-    const float ag = p[26] * lr + p[27] * lg + p[28] * lb;
-    const float ab = p[29] * lr + p[30] * lg + p[31] * lb;
+    // ACEScct / ACEScc / Linear are already AP1; skip the identity multiply.
+    float ar = lr, ag = lg, ab = lb;
+    if (space > (float)CM_SPACE_LINEAR)
+    {
+        ar = p[23] * lr + p[24] * lg + p[25] * lb;
+        ag = p[26] * lr + p[27] * lg + p[28] * lb;
+        ab = p[29] * lr + p[30] * lg + p[31] * lb;
+    }
 
     // Exposure and white balance in one matrix multiply. The falloff belongs
     // between the two, but it is a single scalar applied to all three channels
@@ -500,11 +513,15 @@ CM_INLINE void cmProcessPixel(float inR, float inG, float inB, float x, float y,
     const float tg = cmTone(mg, pivot, slope, p[11], p[12], p[13], p[14], p[15], p[16]);
     const float tb = cmTone(mb, pivot, slope, p[11], p[12], p[13], p[14], p[15], p[16]);
 
-    const float cr = p[32] * tr + p[33] * tg + p[34] * tb;
-    const float cg = p[35] * tr + p[36] * tg + p[37] * tb;
-    const float cb = p[38] * tr + p[39] * tg + p[40] * tb;
+    if (space > (float)CM_SPACE_LINEAR)
+    {
+        *outR = cmEncode(p[32] * tr + p[33] * tg + p[34] * tb, space);
+        *outG = cmEncode(p[35] * tr + p[36] * tg + p[37] * tb, space);
+        *outB = cmEncode(p[38] * tr + p[39] * tg + p[40] * tb, space);
+        return;
+    }
 
-    *outR = cmEncode(cr, space);
-    *outG = cmEncode(cg, space);
-    *outB = cmEncode(cb, space);
+    *outR = cmEncode(tr, space);
+    *outG = cmEncode(tg, space);
+    *outB = cmEncode(tb, space);
 }

@@ -10,6 +10,7 @@
 #include "../ColorMath.h"
 #include "../ColorSpaces.h"
 #include "../KernelParams.h"
+#include "../Saturation.h"
 #include "../WhiteBalance.h"
 
 namespace
@@ -77,6 +78,52 @@ namespace
     {
         p.workingSpace = static_cast<float>(space);
         cs::applyWorkingSpaceMatrices(p);
+    }
+
+    void mulSat(KernelParams& p, double rSat, double rHue,
+                double gSat, double gHue, double bSat, double bHue)
+    {
+        float satM[9];
+        sat::computeMatrix(rSat, rHue, gSat, gHue, bSat, bHue, satM);
+        float folded[9];
+        for (int r = 0; r < 3; ++r)
+        {
+            for (int c = 0; c < 3; ++c)
+            {
+                folded[r * 3 + c] = satM[r * 3 + 0] * p.matrix[0 * 3 + c]
+                                  + satM[r * 3 + 1] * p.matrix[1 * 3 + c]
+                                  + satM[r * 3 + 2] * p.matrix[2 * 3 + c];
+            }
+        }
+        for (int i = 0; i < 9; ++i)
+        {
+            p.matrix[i] = folded[i];
+        }
+    }
+
+    // ACES AP1 to XYZ, same figures as WhiteBalance.cpp.
+    const double kAP1ToXYZ[9] = {
+         0.6624541811,  0.1340042065,  0.1561876870,
+         0.2722287168,  0.6740817658,  0.0536895174,
+        -0.0055746495,  0.0040607335,  1.0103391003
+    };
+
+    void ap1ToXy(double r, double g, double b, double* x, double* y)
+    {
+        const double X = kAP1ToXYZ[0] * r + kAP1ToXYZ[1] * g + kAP1ToXYZ[2] * b;
+        const double Y = kAP1ToXYZ[3] * r + kAP1ToXYZ[4] * g + kAP1ToXYZ[5] * b;
+        const double Z = kAP1ToXYZ[6] * r + kAP1ToXYZ[7] * g + kAP1ToXYZ[8] * b;
+        const double s = X + Y + Z;
+        *x = X / s;
+        *y = Y / s;
+    }
+
+    void applyMatrix(const float m[9], float r, float g, float b,
+                     float* outR, float* outG, float* outB)
+    {
+        *outR = m[0] * r + m[1] * g + m[2] * b;
+        *outG = m[3] * r + m[4] * g + m[5] * b;
+        *outB = m[6] * r + m[7] * g + m[8] * b;
     }
 
     void processAt(const KernelParams& p, double x, double y, float r, float g, float b,
@@ -211,9 +258,9 @@ static void testIdentity()
 
     float r, g, b;
     process(linearSpace, -0.02f, -0.005f, 0.3f, &r, &g, &b);
-    checkClose(r, -0.02, 1e-6, "negative linear survives the log round trip");
-    checkClose(g, -0.005, 1e-6, "negative linear survives the log round trip");
-    checkClose(b, 0.3, 1e-6, "positive linear survives the log round trip");
+    check(r == -0.02f, "idle tone leaves a negative bit-exact");
+    check(g == -0.005f, "idle tone leaves a negative bit-exact");
+    check(b == 0.3f, "idle tone leaves a positive bit-exact");
 
     // ACEScc as well.
     KernelParams cc = defaultParams();
@@ -282,6 +329,151 @@ static void testCameraWorkingSpaces()
         checkCloseRelative(cmDecode(r, p.workingSpace), 0.36, 1e-5,
                            std::string(names[s]) + " +1 EV doubles linear");
     }
+}
+
+static void testPrimarySat()
+{
+    section("Primary sat / hue");
+
+    float ident[9];
+    sat::computeMatrix(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, ident);
+    for (int i = 0; i < 9; ++i)
+    {
+        const float expect = (i % 4 == 0) ? 1.0f : 0.0f;
+        checkClose(ident[i], expect, 1e-9, "sat/hue at 1 is an identity 3x3");
+    }
+
+    float movedR[9];
+    sat::computeMatrix(1.1, 0.9, 1.0, 1.0, 1.0, 1.0, movedR);
+    float rr0, rg0, rb0;
+    applyMatrix(movedR, 1.0f, 0.0f, 0.0f, &rr0, &rg0, &rb0);
+    check(fabsf(rg0) > 1e-4f || fabsf(rb0) > 1e-4f,
+          "R Sat 1.1 / R Hue 0.9 actually moves the AP1 R primary");
+
+    double white[2];
+    double ap1[6];
+    cs::acesWhiteXy(white);
+    cs::ap1PrimariesXy(ap1);
+
+    double wu, wv, ru, rv, gu, gv, bu, bv;
+    sat::xyToUV(white[0], white[1], &wu, &wv);
+    sat::xyToUV(ap1[0], ap1[1], &ru, &rv);
+    sat::xyToUV(ap1[2], ap1[3], &gu, &gv);
+    sat::xyToUV(ap1[4], ap1[5], &bu, &bv);
+    const double rLen = hypot(ru - wu, rv - wv);
+    const double gLen = hypot(gu - wu, gv - wv);
+    const double bLen = hypot(bu - wu, bv - wv);
+
+    double adj[6];
+    sat::adjustedPrimaries(1.1, 1.0, 1.0, 1.0, 1.0, 1.0, adj);
+    double u, v;
+    sat::xyToUV(adj[0], adj[1], &u, &v);
+    checkClose(hypot(u - wu, v - wv) / rLen, 1.1, 1e-5, "R Sat 1.1 lengthens W to R by 10%");
+
+    sat::adjustedPrimaries(0.9, 1.0, 1.0, 1.0, 1.0, 1.0, adj);
+    sat::xyToUV(adj[0], adj[1], &u, &v);
+    checkClose(hypot(u - wu, v - wv) / rLen, 0.9, 1e-5, "R Sat 0.9 shortens W to R by 10%");
+
+    sat::adjustedPrimaries(1.0, 1.0, 1.1, 1.0, 1.0, 1.0, adj);
+    sat::xyToUV(adj[2], adj[3], &u, &v);
+    checkClose(hypot(u - wu, v - wv) / gLen, 1.1, 1e-5, "G Sat 1.1 lengthens W to G by 10%");
+
+    sat::adjustedPrimaries(1.0, 1.0, 1.0, 1.0, 1.1, 1.0, adj);
+    sat::xyToUV(adj[4], adj[5], &u, &v);
+    checkClose(hypot(u - wu, v - wv) / bLen, 1.1, 1e-5, "B Sat 1.1 lengthens W to B by 10%");
+
+    sat::adjustedPrimaries(1.0, 1.1, 1.0, 1.0, 1.0, 1.0, adj);
+    sat::xyToUV(adj[0], adj[1], &u, &v);
+    const double duPos = u - ru;
+    const double dvPos = v - rv;
+    const double rVu = ru - wu;
+    const double rVv = rv - wv;
+    checkClose((duPos * rVu + dvPos * rVv) / (rLen * rLen), 0.0, 1e-5,
+               "R Hue 1.1 is perpendicular to W to R");
+    checkClose(hypot(duPos, dvPos) / rLen, 0.1, 1e-5, "R Hue 1.1 is 10% of W to R");
+
+    sat::adjustedPrimaries(1.0, 0.9, 1.0, 1.0, 1.0, 1.0, adj);
+    sat::xyToUV(adj[0], adj[1], &u, &v);
+    checkClose(((u - ru) * rVu + (v - rv) * rVv) / (rLen * rLen), 0.0, 1e-5,
+               "R Hue 0.9 is perpendicular to W to R");
+    checkClose((duPos * (u - ru) + dvPos * (v - rv)), -0.01 * rLen * rLen, 1e-6,
+               "R Hue 0.9 is opposite R Hue 1.1");
+
+    // Full NPM holds the ACES white, so greys stay put. Unmoved primaries
+    // stay on-axis; their amounts are allowed to change.
+    const struct
+    {
+        double sliders[6];
+        int moved;
+        const char* label;
+    } locked[] = {
+        { { 1.1, 0.9, 1.0, 1.0, 1.0, 1.0 }, 0, "R Sat 1.1 / R Hue 0.9" },
+        { { 1.0, 1.0, 1.1, 0.9, 1.0, 1.0 }, 1, "G Sat 1.1 / G Hue 0.9" },
+        { { 1.0, 1.0, 1.0, 1.0, 1.1, 0.9 }, 2, "B Sat 1.1 / B Hue 0.9" }
+    };
+    for (int c = 0; c < 3; ++c)
+    {
+        float m[9];
+        sat::computeMatrix(locked[c].sliders[0], locked[c].sliders[1],
+                           locked[c].sliders[2], locked[c].sliders[3],
+                           locked[c].sliders[4], locked[c].sliders[5], m);
+
+        float wr, wg, wb;
+        applyMatrix(m, 1.0f, 1.0f, 1.0f, &wr, &wg, &wb);
+        checkClose(wr, 1.0, 1e-5, std::string(locked[c].label) + " leaves AP1 white alone");
+        checkClose(wg, 1.0, 1e-5, std::string(locked[c].label) + " leaves AP1 white alone");
+        checkClose(wb, 1.0, 1e-5, std::string(locked[c].label) + " leaves AP1 white alone");
+        applyMatrix(m, 0.18f, 0.18f, 0.18f, &wr, &wg, &wb);
+        checkClose(wr, 0.18, 1e-5, std::string(locked[c].label) + " leaves AP1 grey alone");
+        checkClose(wg, 0.18, 1e-5, std::string(locked[c].label) + " leaves AP1 grey alone");
+        checkClose(wb, 0.18, 1e-5, std::string(locked[c].label) + " leaves AP1 grey alone");
+
+        for (int p = 0; p < 3; ++p)
+        {
+            if (p == locked[c].moved)
+            {
+                continue;
+            }
+            const float in[3] = {
+                (p == 0) ? 1.0f : 0.0f,
+                (p == 1) ? 1.0f : 0.0f,
+                (p == 2) ? 1.0f : 0.0f
+            };
+            float r, g, b;
+            applyMatrix(m, in[0], in[1], in[2], &r, &g, &b);
+            const char* name = (p == 0) ? "R" : (p == 1) ? "G" : "B";
+            const std::string what = std::string(locked[c].label) + " keeps AP1 " + name + " on-axis";
+            checkClose(r, (p == 0) ? r : 0.0, 1e-5, what);
+            checkClose(g, (p == 1) ? g : 0.0, 1e-5, what);
+            checkClose(b, (p == 2) ? b : 0.0, 1e-5, what);
+        }
+    }
+
+    float satM[9];
+    sat::computeMatrix(1.1, 1.0, 1.0, 1.0, 1.0, 1.0, satM);
+    float rr, rg, rb;
+    applyMatrix(satM, 1.0f, 0.0f, 0.0f, &rr, &rg, &rb);
+    double mx, my, mu, mv;
+    ap1ToXy(rr, rg, rb, &mx, &my);
+    sat::xyToUV(mx, my, &mu, &mv);
+    checkClose(hypot(mu - wu, mv - wv) / rLen, 1.1, 2e-4,
+               "the sat matrix sends AP1 red to the adjusted R primary");
+
+    KernelParams p = defaultParams();
+    p.workingSpace = CM_SPACE_LINEAR;
+    mulSat(p, 1.2, 0.9, 0.85, 1.1, 1.15, 0.95);
+    float outR, outG, outB;
+    process(p, 0.18f, 0.18f, 0.18f, &outR, &outG, &outB);
+    checkClose(outR, 0.18, 1e-5, "folded sat leaves linear grey alone");
+    checkClose(outG, 0.18, 1e-5, "folded sat leaves linear grey alone");
+    checkClose(outB, 0.18, 1e-5, "folded sat leaves linear grey alone");
+
+    for (int i = 0; i < 9; ++i)
+    {
+        p.matrix[i] *= 2.0f;
+    }
+    process(p, 0.18f, 0.18f, 0.18f, &outR, &outG, &outB);
+    checkCloseRelative(outR, 0.36, 1e-5, "+1 EV still doubles grey after sat is folded in");
 }
 
 static void testExposure()
@@ -941,6 +1133,81 @@ static void testChannelIndependence()
     check(raw[32] == 1.0f && raw[36] == 1.0f && raw[40] == 1.0f, "ACES spaces use an identity outMatrix");
 }
 
+static void testAp1ToRec709()
+{
+    section("AP1 to Rec.709");
+
+    // Rec.709 / sRGB primaries, ITU-R BT.709, D65.
+    const double rec709[6] = {
+        0.640, 0.330,
+        0.300, 0.600,
+        0.150, 0.060
+    };
+    const double d65[2] = { 0.3127, 0.3290 };
+
+    double ap1[6];
+    double acesW[2];
+    cs::ap1PrimariesXy(ap1);
+    cs::acesWhiteXy(acesW);
+
+    double ap1ToXyz[9];
+    double recToXyz[9];
+    cs::rgbToXyz(ap1, acesW, ap1ToXyz);
+    cs::rgbToXyz(rec709, d65, recToXyz);
+
+    // invert Rec.709 RGB->XYZ
+    const double a = recToXyz[0], b = recToXyz[1], c = recToXyz[2];
+    const double d = recToXyz[3], e = recToXyz[4], f = recToXyz[5];
+    const double g = recToXyz[6], h = recToXyz[7], i = recToXyz[8];
+    const double A = (e * i - f * h);
+    const double B = -(d * i - f * g);
+    const double C = (d * h - e * g);
+    const double D = -(b * i - c * h);
+    const double E = (a * i - c * g);
+    const double F = -(a * h - b * g);
+    const double G = (b * f - c * e);
+    const double H = -(a * f - c * d);
+    const double I = (a * e - b * d);
+    const double det = a * A + b * B + c * C;
+    const double inv = 1.0 / det;
+    const double xyzToRec[9] = {
+        A * inv, D * inv, G * inv,
+        B * inv, E * inv, H * inv,
+        C * inv, F * inv, I * inv
+    };
+
+    // No CAT: white is allowed to shift from ACES white to D65. This is the
+    // published ACES AP1_2_XYZ * XYZ_2_REC709 product (without D60_2_D65).
+    double m[9];
+    for (int r = 0; r < 3; ++r)
+    {
+        for (int col = 0; col < 3; ++col)
+        {
+            m[r * 3 + col] = xyzToRec[r * 3 + 0] * ap1ToXyz[0 * 3 + col]
+                           + xyzToRec[r * 3 + 1] * ap1ToXyz[1 * 3 + col]
+                           + xyzToRec[r * 3 + 2] * ap1ToXyz[2 * 3 + col];
+        }
+    }
+
+    const double acesNoCat[9] = {
+         1.7312543, -0.6040425, -0.0801079,
+        -0.1316195,  1.1348416, -0.0086797,
+        -0.0245675, -0.1257497,  1.0656367
+    };
+    for (int n = 0; n < 9; ++n)
+    {
+        checkClose(m[n], acesNoCat[n], 1.5e-6,
+                   "AP1 to Rec.709 with a shifted white matches the ACES 3x3");
+    }
+
+    // Confirm white actually moves: AP1 (1,1,1) is ACES white, not D65.
+    const double wR = m[0] + m[1] + m[2];
+    const double wG = m[3] + m[4] + m[5];
+    const double wB = m[6] + m[7] + m[8];
+    check(fabs(wR - 1.0) > 1e-3 || fabs(wG - 1.0) > 1e-3 || fabs(wB - 1.0) > 1e-3,
+          "AP1 white does not land on Rec.709 (1,1,1) when CAT is omitted");
+}
+
 int main()
 {
     printf("\nTechnical Grade pipeline checks\n\n");
@@ -948,6 +1215,8 @@ int main()
     testTransferFunctions();
     testIdentity();
     testCameraWorkingSpaces();
+    testPrimarySat();
+    testAp1ToRec709();
     testExposure();
     testLensFalloff();
     testContrastPivot();

@@ -12,6 +12,7 @@
 #include "ColorMath.h"
 #include "ColorSpaces.h"
 #include "KernelParams.h"
+#include "Saturation.h"
 #include "WhiteBalance.h"
 
 #define kPluginName "Technical Grade"
@@ -20,12 +21,12 @@
     "Scene-linear exposure, lens falloff, white balance, contrast and highlight/shadow " \
     "limiting for ACES.\n\n" \
     "Decodes the selected working space to linear AP1, applies an exposure gain, a radial " \
-    "falloff and a Bradford chromatic adaptation driven by temperature and tint, then moves " \
+    "falloff, a Bradford chromatic adaptation and an AP1 primary sat/hue matrix, then moves " \
     "to log2 exposure to pivot contrast about middle grey and roll the extremes off with a " \
     "sigmoid before re-encoding."
 #define kPluginIdentifier "com.nfx.TechnicalGrade"
 #define kPluginVersionMajor 2
-#define kPluginVersionMinor 3
+#define kPluginVersionMinor 4
 
 #define kSupportsTiles false
 #define kSupportsMultiResolution false
@@ -33,12 +34,32 @@
 
 namespace
 {
-    // Middle grey is the linear pivot. The slider shows that number, default
-    // 0.18, and the ends are two stops either side (0.18 * 2^±2).
+    // Visible middle grey is in stops around 0.18. Resolve sliders are linear
+    // in the stored number, so −2 / 0 / +2 sit equally apart and map to
+    // 0.045 / 0.18 / 0.72 in the kernel.
     const double kBasePivot = 0.18;
     const double kPivotRangeEV = 2.0;
     const double kPivotMin = kBasePivot * exp2(-kPivotRangeEV);
     const double kPivotMax = kBasePivot * exp2(kPivotRangeEV);
+
+    double pivotFromEV(double ev)
+    {
+        return kBasePivot * exp2(ev);
+    }
+
+    double evFromPivot(double linear)
+    {
+        if (!(linear > 0.0))
+        {
+            return 0.0;
+        }
+        return log2(linear / kBasePivot);
+    }
+
+    double clampd(double v, double lo, double hi)
+    {
+        return v < lo ? lo : (v > hi ? hi : v);
+    }
 
     // Contrast is set in stops: the slope is 2^control, so the control
     // runs -1 to +1 for a slope of 0.5 to 2 and is symmetric about no change.
@@ -90,9 +111,18 @@ extern void RunMetalKernel(void* p_CmdQ, int p_Width, int p_Height, const float*
 void TechnicalGradeProcessor::processImagesMetal()
 {
 #ifdef __APPLE__
+    if (!_srcImg || !_dstImg)
+    {
+        return;
+    }
+
     const OfxRectI& bounds = _srcImg->getBounds();
     const int width = bounds.x2 - bounds.x1;
     const int height = bounds.y2 - bounds.y1;
+    if (width <= 0 || height <= 0)
+    {
+        return;
+    }
 
     const float* input = static_cast<const float*>(_srcImg->getPixelData());
     float* output = static_cast<float*>(_dstImg->getPixelData());
@@ -115,6 +145,10 @@ void TechnicalGradeProcessor::multiThreadProcessImages(OfxRectI p_ProcWindow)
         if (_effect.abort()) break;
 
         float* dstPix = static_cast<float*>(_dstImg->getPixelAddress(p_ProcWindow.x1, y));
+        if (!dstPix)
+        {
+            continue;
+        }
         const float py = static_cast<float>(y - bounds.y1) + 0.5f;
 
         for (int x = p_ProcWindow.x1; x < p_ProcWindow.x2; ++x)
@@ -160,6 +194,7 @@ public:
 
     virtual void render(const OFX::RenderArguments& p_Args);
     virtual bool isIdentity(const OFX::IsIdentityArguments& p_Args, OFX::Clip*& p_IdentityClip, double& p_IdentityTime);
+    virtual void changedParam(const OFX::InstanceChangedArgs& p_Args, const std::string& p_ParamName);
 
     void setupAndProcess(TechnicalGradeProcessor& p_Processor, const OFX::RenderArguments& p_Args);
 
@@ -167,6 +202,7 @@ private:
     KernelParams buildParams(double p_Time, const OfxRectI& p_Bounds, double p_PixelAspect);
     bool highlightLimiterOn(double p_Time);
     bool shadowLimiterOn(double p_Time);
+    void migrateMiddleGreyFromLinear();
 
     // Does not own the following pointers
     OFX::Clip* m_DstClip;
@@ -177,7 +213,14 @@ private:
     OFX::DoubleParam* m_Vignette;
     OFX::DoubleParam* m_Temperature;
     OFX::DoubleParam* m_Tint;
+    OFX::DoubleParam* m_RSat;
+    OFX::DoubleParam* m_RHue;
+    OFX::DoubleParam* m_GSat;
+    OFX::DoubleParam* m_GHue;
+    OFX::DoubleParam* m_BSat;
+    OFX::DoubleParam* m_BHue;
     OFX::DoubleParam* m_Pivot;
+    OFX::DoubleParam* m_PivotEV;
     OFX::DoubleParam* m_Contrast;
     OFX::BooleanParam* m_ShadowEnable;
     OFX::DoubleParam* m_ShadowLimit;
@@ -198,7 +241,14 @@ TechnicalGradePlugin::TechnicalGradePlugin(OfxImageEffectHandle p_Handle)
     m_Vignette = fetchDoubleParam("vignette");
     m_Temperature = fetchDoubleParam("temperature");
     m_Tint = fetchDoubleParam("tint");
+    m_RSat = fetchDoubleParam("rSat");
+    m_RHue = fetchDoubleParam("rHue");
+    m_GSat = fetchDoubleParam("gSat");
+    m_GHue = fetchDoubleParam("gHue");
+    m_BSat = fetchDoubleParam("bSat");
+    m_BHue = fetchDoubleParam("bHue");
     m_Pivot = fetchDoubleParam("middleGrey");
+    m_PivotEV = fetchDoubleParam("middleGreyEV");
     m_Contrast = fetchDoubleParam("contrast");
     m_ShadowEnable = fetchBooleanParam("shadowEnable");
     m_ShadowLimit = fetchDoubleParam("shadowLimit");
@@ -206,6 +256,8 @@ TechnicalGradePlugin::TechnicalGradePlugin(OfxImageEffectHandle p_Handle)
     m_HighlightEnable = fetchBooleanParam("highlightEnable");
     m_HighlightLimit = fetchDoubleParam("highlightLimit");
     m_HighlightSoftness = fetchDoubleParam("highlightSoftness");
+
+    migrateMiddleGreyFromLinear();
 }
 
 void TechnicalGradePlugin::render(const OFX::RenderArguments& p_Args)
@@ -229,10 +281,18 @@ bool TechnicalGradePlugin::isIdentity(const OFX::IsIdentityArguments& p_Args, OF
     const double temperature = m_Temperature->getValueAtTime(p_Args.time);
     const double tint = m_Tint->getValueAtTime(p_Args.time);
     const double contrast = m_Contrast->getValueAtTime(p_Args.time);
+    const double rSat = m_RSat->getValueAtTime(p_Args.time);
+    const double rHue = m_RHue->getValueAtTime(p_Args.time);
+    const double gSat = m_GSat->getValueAtTime(p_Args.time);
+    const double gHue = m_GHue->getValueAtTime(p_Args.time);
+    const double bSat = m_BSat->getValueAtTime(p_Args.time);
+    const double bHue = m_BHue->getValueAtTime(p_Args.time);
 
     // The pivot is only observable through contrast or the limiters, so it is
     // deliberately absent from this test.
     if ((exposure == 0.0) && (vignette == 0.0) && (temperature == 0.0) && (tint == 0.0) &&
+        (rSat == 1.0) && (rHue == 1.0) && (gSat == 1.0) && (gHue == 1.0) &&
+        (bSat == 1.0) && (bHue == 1.0) &&
         (contrast == 0.0) && !shadowLimiterOn(p_Args.time) && !highlightLimiterOn(p_Args.time))
     {
         p_IdentityClip = m_SrcClip;
@@ -263,9 +323,30 @@ bool TechnicalGradePlugin::shadowLimiterOn(double p_Time)
     return m_ShadowLimit->getValueAtTime(p_Time) > -kMaxLimiterEV + 1e-6;
 }
 
+void TechnicalGradePlugin::migrateMiddleGreyFromLinear()
+{
+    // Older nodes only stored the linear pivot. The EV slider defaults to 0, so
+    // a non-default linear value on a new param means this is one of those.
+    const double linear = m_Pivot->getValue();
+    const double ev = m_PivotEV->getValue();
+    if (fabs(ev) < 1e-12 && fabs(linear - kBasePivot) > 1e-6)
+    {
+        m_PivotEV->setValue(clampd(evFromPivot(linear), -kPivotRangeEV, kPivotRangeEV));
+    }
+}
+
+void TechnicalGradePlugin::changedParam(const OFX::InstanceChangedArgs& p_Args, const std::string& p_ParamName)
+{
+    if (p_ParamName == "middleGreyEV")
+    {
+        const double ev = clampd(m_PivotEV->getValueAtTime(p_Args.time), -kPivotRangeEV, kPivotRangeEV);
+        m_Pivot->setValue(pivotFromEV(ev));
+    }
+}
+
 KernelParams TechnicalGradePlugin::buildParams(double p_Time, const OfxRectI& p_Bounds, double p_PixelAspect)
 {
-    KernelParams params;
+    KernelParams params{};
 
     const double temperature = m_Temperature->getValueAtTime(p_Time);
     const double tint = m_Tint->getValueAtTime(p_Time);
@@ -280,9 +361,30 @@ KernelParams TechnicalGradePlugin::buildParams(double p_Time, const OfxRectI& p_
         params.matrix[i] *= gain;
     }
 
+    float satMatrix[9];
+    sat::computeMatrix(m_RSat->getValueAtTime(p_Time), m_RHue->getValueAtTime(p_Time),
+                       m_GSat->getValueAtTime(p_Time), m_GHue->getValueAtTime(p_Time),
+                       m_BSat->getValueAtTime(p_Time), m_BHue->getValueAtTime(p_Time),
+                       satMatrix);
+
+    float folded[9];
+    for (int r = 0; r < 3; ++r)
+    {
+        for (int c = 0; c < 3; ++c)
+        {
+            folded[r * 3 + c] = satMatrix[r * 3 + 0] * params.matrix[0 * 3 + c]
+                              + satMatrix[r * 3 + 1] * params.matrix[1 * 3 + c]
+                              + satMatrix[r * 3 + 2] * params.matrix[2 * 3 + c];
+        }
+    }
+    for (int i = 0; i < 9; ++i)
+    {
+        params.matrix[i] = folded[i];
+    }
+
     // Both tone controls are set in stops and converted to the linear quantities
     // the kernel wants, which keeps the sliders evenly spaced in what the eye sees.
-    params.pivot = static_cast<float>(m_Pivot->getValueAtTime(p_Time));
+    params.pivot = static_cast<float>(pivotFromEV(m_PivotEV->getValueAtTime(p_Time)));
     params.slope = static_cast<float>(exp2(m_Contrast->getValueAtTime(p_Time)));
 
     params.shadowEnable = shadowLimiterOn(p_Time) ? 1.0f : 0.0f;
@@ -308,11 +410,24 @@ KernelParams TechnicalGradePlugin::buildParams(double p_Time, const OfxRectI& p_
 
 void TechnicalGradePlugin::setupAndProcess(TechnicalGradeProcessor& p_Processor, const OFX::RenderArguments& p_Args)
 {
-    std::unique_ptr<OFX::Image> dst(m_DstClip->fetchImage(p_Args.time));
+    std::unique_ptr<OFX::Image> dst(m_DstClip ? m_DstClip->fetchImage(p_Args.time) : 0);
+    if (!dst)
+    {
+        OFX::throwSuiteStatusException(kOfxStatFailed);
+    }
+
+    std::unique_ptr<OFX::Image> src;
+    if (m_SrcClip && m_SrcClip->isConnected())
+    {
+        src.reset(m_SrcClip->fetchImage(p_Args.time));
+    }
+    if (!src)
+    {
+        OFX::throwSuiteStatusException(kOfxStatFailed);
+    }
+
     OFX::BitDepthEnum dstBitDepth = dst->getPixelDepth();
     OFX::PixelComponentEnum dstComponents = dst->getPixelComponents();
-
-    std::unique_ptr<OFX::Image> src(m_SrcClip->fetchImage(p_Args.time));
     OFX::BitDepthEnum srcBitDepth = src->getPixelDepth();
     OFX::PixelComponentEnum srcComponents = src->getPixelComponents();
 
@@ -471,16 +586,58 @@ void TechnicalGradePluginFactory::describeInContext(OFX::ImageEffectDescriptor& 
         0.0, -100.0, 100.0, 0.5, exposureGroup);
     page->addChild(*param);
 
+    // Primaries -------------------------------------------------------------
+    GroupParamDescriptor* primariesGroup = p_Desc.defineGroupParam("primaries");
+    primariesGroup->setLabels("Primaries", "Primaries", "Primaries");
+    primariesGroup->setHint("Expand, shrink or hue-shift AP1 R, G and B in CIE 1960 uv around the ACES white.");
+    page->addChild(*primariesGroup);
+
+    param = defineDouble(p_Desc, "rSat", "R Sat",
+        "Scale of the ACES-white to AP1-red vector in CIE 1960 uv. 1 is unchanged, 1.1 is 10% longer.",
+        1.0, 0.5, 1.5, 0.01, primariesGroup);
+    page->addChild(*param);
+
+    param = defineDouble(p_Desc, "rHue", "R Hue Shift",
+        "Offset to the right of the red axis, as a fraction of that vector. 1 is unchanged, 1.1 is 10% to the right.",
+        1.0, 0.5, 1.5, 0.01, primariesGroup);
+    page->addChild(*param);
+
+    param = defineDouble(p_Desc, "gSat", "G Sat",
+        "Scale of the ACES-white to AP1-green vector in CIE 1960 uv. 1 is unchanged, 1.1 is 10% longer.",
+        1.0, 0.5, 1.5, 0.01, primariesGroup);
+    page->addChild(*param);
+
+    param = defineDouble(p_Desc, "gHue", "G Hue Shift",
+        "Offset to the right of the green axis, as a fraction of that vector. 1 is unchanged, 1.1 is 10% to the right.",
+        1.0, 0.5, 1.5, 0.01, primariesGroup);
+    page->addChild(*param);
+
+    param = defineDouble(p_Desc, "bSat", "B Sat",
+        "Scale of the ACES-white to AP1-blue vector in CIE 1960 uv. 1 is unchanged, 1.1 is 10% longer.",
+        1.0, 0.5, 1.5, 0.01, primariesGroup);
+    page->addChild(*param);
+
+    param = defineDouble(p_Desc, "bHue", "B Hue Shift",
+        "Offset to the right of the blue axis, as a fraction of that vector. 1 is unchanged, 1.1 is 10% to the right.",
+        1.0, 0.5, 1.5, 0.01, primariesGroup);
+    page->addChild(*param);
+
     // Tonal range -----------------------------------------------------------
     GroupParamDescriptor* toneGroup = p_Desc.defineGroupParam("tonalRange");
     toneGroup->setLabels("Tonal Range", "Tonal Range", "Tonal Range");
     toneGroup->setHint("Contrast and limiters, all relative to the same middle grey.");
     page->addChild(*toneGroup);
 
+    // Linear storage kept for older projects. The visible slider is in EV so
+    // 0 is 0.18 and the ends are two stops either side.
     param = defineDouble(p_Desc, "middleGrey", "Middle Grey",
-        "The linear tone held fixed by the contrast slope, and the origin the limiters measure from. "
-        "0.18 is ACEScct middle grey. The ends are two stops either side: 0.045 and 0.72.",
-        kBasePivot, kPivotMin, kPivotMax, 0.005, toneGroup);
+        "Linear pivot, kept so older projects still load.",
+        kBasePivot, kPivotMin, kPivotMax, 0.001, 0);
+    param->setIsSecret(true);
+
+    param = defineDouble(p_Desc, "middleGreyEV", "Middle Grey (EV)",
+        "Stops around linear 0.18. 0 leaves the pivot at 0.18, −2 is 0.045, +2 is 0.72.",
+        0.0, -kPivotRangeEV, kPivotRangeEV, 0.01, toneGroup);
     page->addChild(*param);
 
     param = defineDouble(p_Desc, "contrast", "Contrast",
@@ -497,7 +654,7 @@ void TechnicalGradePluginFactory::describeInContext(OFX::ImageEffectDescriptor& 
 
     param = defineDouble(p_Desc, "highlightSoftness", "Highlight Softness",
         "How far down towards middle grey the roll-off begins. At 1 it starts at middle grey itself.",
-        0.5, kMinSoftness, 1.0, 0.01, toneGroup);
+        0.6, kMinSoftness, 1.0, 0.01, toneGroup);
     page->addChild(*param);
 
     param = defineDouble(p_Desc, "shadowLimit", "Shadow Limit (EV)",
@@ -508,7 +665,7 @@ void TechnicalGradePluginFactory::describeInContext(OFX::ImageEffectDescriptor& 
 
     param = defineDouble(p_Desc, "shadowSoftness", "Shadow Softness",
         "How far up towards middle grey the roll-off begins. At 1 it starts at middle grey itself.",
-        0.5, kMinSoftness, 1.0, 0.01, toneGroup);
+        0.6, kMinSoftness, 1.0, 0.01, toneGroup);
     page->addChild(*param);
 
     // Hidden leftovers so existing projects still load. White balance always

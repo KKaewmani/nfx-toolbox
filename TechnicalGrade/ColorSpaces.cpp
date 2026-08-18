@@ -115,7 +115,7 @@ namespace
         xyz[2] = (1.0 - x - y) / y;
     }
 
-    void rgbToXyz(const double prim[6], const double white[2], double out[9])
+    void buildRgbToXyz(const double prim[6], const double white[2], double out[9])
     {
         double r[3], g[3], b[3], w[3];
         xyToXYZ(prim[0], prim[1], r);
@@ -130,7 +130,15 @@ namespace
         };
 
         double Minv[9];
-        invert3x3(M, Minv);
+        if (!invert3x3(M, Minv))
+        {
+            for (int i = 0; i < 9; ++i)
+            {
+                out[i] = 0.0;
+            }
+            out[0] = out[4] = out[8] = 1.0;
+            return;
+        }
         double s[3];
         matVec(Minv, w, s);
 
@@ -157,24 +165,6 @@ namespace
         matMul(coneInv, tmp, out);
     }
 
-    void rgbToRgb(const double srcPrim[6], const double srcWhite[2],
-                  const double dstPrim[6], const double dstWhite[2],
-                  double out[9])
-    {
-        double srcToXyz[9], dstToXyz[9], xyzToDst[9];
-        rgbToXyz(srcPrim, srcWhite, srcToXyz);
-        rgbToXyz(dstPrim, dstWhite, dstToXyz);
-        invert3x3(dstToXyz, xyzToDst);
-
-        double srcXYZ[3], dstXYZ[3], cat[9], tmp[9];
-        xyToXYZ(srcWhite[0], srcWhite[1], srcXYZ);
-        xyToXYZ(dstWhite[0], dstWhite[1], dstXYZ);
-        cat02(srcXYZ, dstXYZ, cat);
-
-        matMul(cat, srcToXyz, tmp);
-        matMul(xyzToDst, tmp, out);
-    }
-
     void toFloat(const double src[9], float dst[9])
     {
         for (int i = 0; i < 9; ++i)
@@ -186,8 +176,13 @@ namespace
     void cameraToAp1(const double prim[6], float inM[9], float outM[9])
     {
         double camToAp1[9], ap1ToCam[9];
-        rgbToRgb(prim, kD65, kAP1Primaries, kACESWhite, camToAp1);
-        invert3x3(camToAp1, ap1ToCam);
+        cs::rgbToRgb(prim, kD65, kAP1Primaries, kACESWhite, camToAp1);
+        if (!invert3x3(camToAp1, ap1ToCam))
+        {
+            cs::identityMatrix(inM);
+            cs::identityMatrix(outM);
+            return;
+        }
         toFloat(camToAp1, inM);
         toFloat(ap1ToCam, outM);
     }
@@ -228,4 +223,49 @@ void cs::applyWorkingSpaceMatrices(KernelParams& p)
             identityMatrix(p.outMatrix);
             break;
     }
+}
+
+void cs::ap1PrimariesXy(double out[6])
+{
+    for (int i = 0; i < 6; ++i)
+    {
+        out[i] = kAP1Primaries[i];
+    }
+}
+
+void cs::acesWhiteXy(double out[2])
+{
+    out[0] = kACESWhite[0];
+    out[1] = kACESWhite[1];
+}
+
+void cs::rgbToXyz(const double prim[6], const double white[2], double out[9])
+{
+    buildRgbToXyz(prim, white, out);
+}
+
+void cs::rgbToRgb(const double srcPrim[6], const double srcWhite[2],
+                  const double dstPrim[6], const double dstWhite[2],
+                  double out[9])
+{
+    double srcToXyz[9], dstToXyz[9], xyzToDst[9];
+    buildRgbToXyz(srcPrim, srcWhite, srcToXyz);
+    buildRgbToXyz(dstPrim, dstWhite, dstToXyz);
+    if (!invert3x3(dstToXyz, xyzToDst))
+    {
+        for (int i = 0; i < 9; ++i)
+        {
+            out[i] = 0.0;
+        }
+        out[0] = out[4] = out[8] = 1.0;
+        return;
+    }
+
+    double srcXYZ[3], dstXYZ[3], cat[9], tmp[9];
+    xyToXYZ(srcWhite[0], srcWhite[1], srcXYZ);
+    xyToXYZ(dstWhite[0], dstWhite[1], dstXYZ);
+    cat02(srcXYZ, dstXYZ, cat);
+
+    matMul(cat, srcToXyz, tmp);
+    matMul(xyzToDst, tmp, out);
 }

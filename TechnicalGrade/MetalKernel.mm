@@ -99,9 +99,17 @@ void RunMetalKernel(void* p_CmdQ, int p_Width, int p_Height, const float* p_Para
     id<MTLBuffer> dstDeviceBuf = reinterpret_cast<id<MTLBuffer> >(p_Output);
 
     id<MTLCommandBuffer> commandBuffer = [queue commandBuffer];
+    if (!commandBuffer)
+    {
+        return;
+    }
     commandBuffer.label = @"TechnicalGradeKernel";
 
     id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+    if (!computeEncoder)
+    {
+        return;
+    }
     [computeEncoder setComputePipelineState:pipelineState];
 
     const int exeWidth = [pipelineState threadExecutionWidth];
